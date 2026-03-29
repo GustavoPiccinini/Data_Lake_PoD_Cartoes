@@ -41,12 +41,12 @@ inadimplência e personalização de ofertas.
 
 ```mermaid
 flowchart LR
-    [Ingestão] --> [Raw]
-     --> [Processamento - Spark (EMR)]
-     --> [Trusted Layer (Silver)]
-     --> [Refined Layer (Gold)]
-     -->[Consumo: BI / Data Science]
-     -->[Controle]
+    A[Ingestão] --> B[Raw]
+    B --> C[Processamento - Spark (EMR)]
+    C --> D[Trusted Layer (Silver)]
+    D --> E[Refined Layer (Gold)]
+    E --> F[Consumo: BI / Data Science]
+    E --> G[Controle]
 ```
 
 ---
@@ -93,7 +93,7 @@ flowchart LR
 
 ---
 
-## 📊 Principais Métricas
+## Principais Métricas
 
 - Total de clientes  
 - Clientes inadimplentes  
@@ -104,7 +104,7 @@ flowchart LR
 
 ---
 
-# 📈 Principais Resultados
+# Principais Resultados
 
 - Mais de **10.000 clientes em atraso**  
 - Média de **70 dias de atraso**  
@@ -112,6 +112,3 @@ flowchart LR
 
 ---
 
-## Conclusão
-
-O Data Lake permite centralizar dados e apoiar decisões estratégicas com base em dados confiáveis.
