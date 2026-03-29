@@ -39,15 +39,7 @@ inadimplência e personalização de ofertas.
 
 ## Arquitetura do Data Lake
 
-```mermaid
-flowchart LR
-    A[Ingestão] --> B[Raw]
-    B --> C[Processamento - Spark (EMR)]
-    C --> D[Trusted Layer (Silver)]
-    D --> E[Refined Layer (Gold)]
-    E --> F[Consumo: BI / Data Science]
-    E --> G[Controle]
-```
+![Arquitetura do Data Lake](./arquitetura.png)
 
 ---
 
