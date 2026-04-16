@@ -170,8 +170,8 @@ def count_var(vars_list, window_idx):
 # CARREGAMENTO DE DADOS (embutido — sem necessidade de upload)
 # ──────────────────────────────────────────────────────────────
 DATA_FILES = [
-    "part-00000-cb0b020f-b207-4b41-ba42-a73cf33b33ee_c000_snappy.parquet",
-    "part-00001-cb0b020f-b207-4b41-ba42-a73cf33b33ee_c000_snappy.parquet",
+    "part-00000-cb0b020f-b207-4b41-ba42-a73cf33b33ee.c000.snappy.parquet",
+    "part-00001-cb0b020f-b207-4b41-ba42-a73cf33b33ee.c000.snappy.parquet",
 ]
 
 @st.cache_data(show_spinner="Carregando book de variáveis...")
