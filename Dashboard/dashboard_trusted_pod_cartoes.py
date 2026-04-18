@@ -7,19 +7,21 @@ Execute: streamlit run dashboard_trusted_pod_cartoes.py
 """
 
 import io
-import os
 import json
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import os
+
+
 
 # ══════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="PoD Cartões · Trusted Layer",
+    page_title="PoD Cartões - Trusted Layer",
     page_icon="💳",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -31,37 +33,45 @@ st.set_page_config(
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    import os
-    base_dir = os.path.dirname(__file__)  # garante que pega a pasta do .py
+    base_dir = os.path.dirname(__file__)
     base_fat = os.path.join(base_dir, "tb_faturas")
     base_pag = os.path.join(base_dir, "tb_pagamentos")
 
-    # Lista todas as pastas safra=YYYY-MM
-    safras_fat = [d for d in os.listdir(base_fat) if d.startswith("safra=")]
-    safras_pag = [d for d in os.listdir(base_pag) if d.startswith("safra=")]
+    # Lista todas as pastas ref=YYYYMM
+    safras_fat = [d for d in os.listdir(base_fat) if d.startswith("ref=")]
+    safras_pag = [d for d in os.listdir(base_pag) if d.startswith("ref=")]
 
     # Carrega faturas
     fat = pd.concat([
-        pd.read_parquet(os.path.join(base_fat, safra, file)).assign(safra=safra.replace("safra=", ""))
+        pd.read_parquet(
+            os.path.join(base_fat, safra, file)
+        ).assign(
+            safra=safra.replace("ref=", "")
+        )
         for safra in safras_fat
         for file in os.listdir(os.path.join(base_fat, safra))
         if file.endswith(".parquet")
-    ])
+    ], ignore_index=True)
 
     # Carrega pagamentos
     pag = pd.concat([
-        pd.read_parquet(os.path.join(base_pag, safra, file)).assign(safra=safra.replace("safra=", ""))
+        pd.read_parquet(
+            os.path.join(base_pag, safra, file)
+        ).assign(
+            safra=safra.replace("ref=", "")
+        )
         for safra in safras_pag
         for file in os.listdir(os.path.join(base_pag, safra))
         if file.endswith(".parquet")
-    ])
+    ], ignore_index=True)
 
     # Ajusta tipos de data
-    fat["data_emissao"]    = pd.to_datetime(fat["data_emissao"])
+    fat["data_emissao"] = pd.to_datetime(fat["data_emissao"])
     fat["data_vencimento"] = pd.to_datetime(fat["data_vencimento"])
-    pag["data_pagamento"]  = pd.to_datetime(pag["data_pagamento"])
+    pag["data_pagamento"] = pd.to_datetime(pag["data_pagamento"])
 
     return fat, pag
+
 
 df_fat, df_pag = load_data()
 
@@ -71,15 +81,45 @@ df_fat, df_pag = load_data()
 @st.cache_data(show_spinner=False)
 def build_join(fat, pag):
     df = fat.merge(
-        pag[["id_fatura","id_cliente","data_pagamento","valor_pagamento","safra"]],
-        on=["id_fatura","id_cliente","safra"], how="left"
+        pag[
+            [
+                "id_fatura",
+                "id_cliente",
+                "data_pagamento",
+                "valor_pagamento",
+                "safra"
+            ]
+        ],
+        on=["id_fatura", "id_cliente", "safra"],
+        how="left"
     )
-    df["dias_atraso"] = (df["data_pagamento"] - df["data_vencimento"]).dt.days
-    df["status"] = np.where(df["data_pagamento"].isna(), "Sem Pagamento",
-                   np.where(df["dias_atraso"] > 0, "Pago em Atraso",
-                   np.where(df["valor_pagamento"] < df["valor_pagamento_minimo"],
-                            "Abaixo do Mínimo", "Pago no Prazo")))
+
+    # Dias de atraso
+    df["dias_atraso"] = (
+        df["data_pagamento"] - df["data_vencimento"]
+    ).dt.days
+
+    # Preenche nulos
+    df["valor_pagamento"] = df["valor_pagamento"].fillna(0)
+    df["dias_atraso"] = df["dias_atraso"].fillna(0)
+
+    # Classificação de status
+    df["status"] = np.where(
+        df["data_pagamento"].isna(),
+        "Sem Pagamento",
+        np.where(
+            df["dias_atraso"] > 0,
+            "Pago em Atraso",
+            np.where(
+                df["valor_pagamento"] < df["valor_pagamento_minimo"],
+                "Abaixo do Mínimo",
+                "Pago no Prazo"
+            )
+        )
+    )
+
     return df
+
 
 df_join = build_join(df_fat, df_pag)
 
@@ -181,6 +221,7 @@ STATUS_COLORS = {
     "Sem Pagamento":    "#7b3ff4",
 }
 
+
 # ══════════════════════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════
@@ -209,7 +250,7 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("#### 📅 Safras disponíveis")
+    st.markdown("#### 📅 Referências disponíveis")
     safras_disp = sorted(df_fat["safra"].unique().tolist())
     safras_sel  = st.multiselect("", options=safras_disp, default=safras_disp)
     if not safras_sel:
@@ -235,21 +276,46 @@ df_join_f = df_join[df_join["safra"].isin(safras_sel)]
 # ══════════════════════════════════════════════════════════════
 # HEADER
 # ══════════════════════════════════════════════════════════════
+ref_min = min(safras_sel)
+ref_max = max(safras_sel)
+
 hc1, hc2 = st.columns([4, 1])
+
 with hc1:
-    st.markdown("""
-    <h1 style='font-family:IBM Plex Mono,monospace;font-size:1.65rem;margin-bottom:2px;letter-spacing:-0.01em;'>
-      PoD Cartões &mdash; Camada Trusted
+    st.markdown(f"""
+    <h1 style='font-family:IBM Plex Mono, monospace;
+               font-size:1.65rem;
+               margin-bottom:2px;
+               letter-spacing:-0.01em;
+               color:#e2e8f0;'>
+
+      💳 PoD Cartões — Camada Trusted
     </h1>
-    <p style='color:#1f2937;font-size:0.8rem;margin:0;'>
-      Dados financeiros de faturas e pagamentos · Projeto Data Lake 
+
+    <p style='color:#94a3b8;
+              font-size:0.82rem;
+              margin:0;'>
+
+      Dados financeiros de faturas e pagamentos · Projeto Data Lake
     </p>
     """, unsafe_allow_html=True)
+
 with hc2:
     st.markdown(f"""
-    <div style='text-align:right;padding-top:12px;'>
+    <div style='text-align:right;
+                padding-top:12px;'>
+
       <span class='badge b-blue'>Trusted Layer</span>&nbsp;
-      <span class='badge b-green'>safra 2023-01</span>
+      <span class='badge b-green'>ref {ref_min}</span>
+
+    </div>
+
+    <div style='text-align:right;
+                margin-top:6px;
+                font-size:0.70rem;
+                color:#64748b;'>
+
+      até {ref_max}
     </div>
     """, unsafe_allow_html=True)
 
@@ -310,11 +376,11 @@ with tab_exec:
     with col_ev1:
         fig_vol = go.Figure()
         fig_vol.add_trace(go.Bar(x=df_ev["safra"], y=df_ev["vol_fat"],
-                                  name="Faturado", marker_color="#1d4ed8",
+                                  name="Faturado", marker_color="#2e3d66",
                                   text=[brl(v) for v in df_ev["vol_fat"]],
                                   textposition="outside", textfont=dict(size=9,color="#4b5563")))
         fig_vol.add_trace(go.Bar(x=df_ev["safra"], y=df_ev["vol_pag"],
-                                  name="Pago", marker_color="#4ade80",
+                                  name="Pago", marker_color="#345b42",
                                   text=[brl(v) for v in df_ev["vol_pag"]],
                                   textposition="outside", textfont=dict(size=9,color="#4b5563")))
         fig_vol.update_layout(height=290, barmode="group", title_text="Volume (R$)",
