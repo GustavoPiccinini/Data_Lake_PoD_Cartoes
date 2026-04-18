@@ -5,16 +5,17 @@ Projeto: Data Lake
 Dados disponiveis para analise .
 Execute: streamlit run dashboard_trusted_pod_cartoes.py
 """
-
 import io
 import json
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 import os
 
+import streamlit as st
+import duckdb
+import pandas as pd
+import numpy as np
+
+import plotly.express as px
+import plotly.graph_objects as go
 
 
 # ══════════════════════════════════════════════════════════════
@@ -30,93 +31,98 @@ st.set_page_config(
 # ══════════════════════════════════════════════════════════════
 # LEITURA DOS DADOS DO DATA LAKE
 # ══════════════════════════════════════════════════════════════
-
 @st.cache_data(show_spinner=False)
 def load_data():
+
     base_dir = os.path.dirname(__file__)
-    base_fat = os.path.join(base_dir, "tb_faturas")
-    base_pag = os.path.join(base_dir, "tb_pagamentos")
 
-    # Lista todas as pastas ref=YYYYMM
-    safras_fat = [d for d in os.listdir(base_fat) if d.startswith("ref=")]
-    safras_pag = [d for d in os.listdir(base_pag) if d.startswith("ref=")]
+    db = duckdb.connect()
 
-    # Carrega faturas
-    fat = pd.concat([
-        pd.read_parquet(
-            os.path.join(base_fat, safra, file)
-        ).assign(
-            safra=safra.replace("ref=", "")
-        )
-        for safra in safras_fat
-        for file in os.listdir(os.path.join(base_fat, safra))
-        if file.endswith(".parquet")
-    ], ignore_index=True)
+    fat_path = os.path.join(
+        base_dir,
+        "tb_faturas",
+        "*",
+        "*.parquet"
+    ).replace("\\", "/")
 
-    # Carrega pagamentos
-    pag = pd.concat([
-        pd.read_parquet(
-            os.path.join(base_pag, safra, file)
-        ).assign(
-            safra=safra.replace("ref=", "")
-        )
-        for safra in safras_pag
-        for file in os.listdir(os.path.join(base_pag, safra))
-        if file.endswith(".parquet")
-    ], ignore_index=True)
+    pag_path = os.path.join(
+        base_dir,
+        "tb_pagamentos",
+        "*",
+        "*.parquet"
+    ).replace("\\", "/")
 
-    # Ajusta tipos de data
-    fat["data_emissao"] = pd.to_datetime(fat["data_emissao"])
-    fat["data_vencimento"] = pd.to_datetime(fat["data_vencimento"])
-    pag["data_pagamento"] = pd.to_datetime(pag["data_pagamento"])
+    df_fat = db.execute(f"""
+        SELECT
+            *,
+            regexp_extract(filename,'ref=([0-9]+)',1) AS safra
+        FROM read_parquet('{fat_path}', filename=true)
+    """).df()
 
-    return fat, pag
+    df_pag = db.execute(f"""
+        SELECT
+            *,
+            regexp_extract(filename,'ref=([0-9]+)',1) AS safra
+        FROM read_parquet('{pag_path}', filename=true)
+    """).df()
+
+    df_fat["data_emissao"] = pd.to_datetime(df_fat["data_emissao"])
+    df_fat["data_vencimento"] = pd.to_datetime(df_fat["data_vencimento"])
+    df_pag["data_pagamento"] = pd.to_datetime(df_pag["data_pagamento"])
+
+    return df_fat, df_pag
 
 
 df_fat, df_pag = load_data()
+
 
 # ══════════════════════════════════════════════════════════════
 # JOIN COMPLETO
 # ══════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner=False)
 def build_join(fat, pag):
-    df = fat.merge(
-        pag[
-            [
-                "id_fatura",
-                "id_cliente",
-                "data_pagamento",
-                "valor_pagamento",
-                "safra"
-            ]
-        ],
-        on=["id_fatura", "id_cliente", "safra"],
-        how="left"
-    )
 
-    # Dias de atraso
-    df["dias_atraso"] = (
-        df["data_pagamento"] - df["data_vencimento"]
-    ).dt.days
+    db = duckdb.connect()
 
-    # Preenche nulos
-    df["valor_pagamento"] = df["valor_pagamento"].fillna(0)
-    df["dias_atraso"] = df["dias_atraso"].fillna(0)
+    db.register("fat", fat)
+    db.register("pag", pag)
 
-    # Classificação de status
-    df["status"] = np.where(
-        df["data_pagamento"].isna(),
-        "Sem Pagamento",
-        np.where(
-            df["dias_atraso"] > 0,
-            "Pago em Atraso",
-            np.where(
-                df["valor_pagamento"] < df["valor_pagamento_minimo"],
-                "Abaixo do Mínimo",
-                "Pago no Prazo"
-            )
-        )
-    )
+    df = db.execute("""
+        SELECT
+            f.*,
+            p.data_pagamento,
+            COALESCE(p.valor_pagamento, 0) AS valor_pagamento,
+
+            COALESCE(
+                date_diff(
+                    'day',
+                    f.data_vencimento,
+                    p.data_pagamento
+                ),
+                0
+            ) AS dias_atraso,
+
+            CASE
+                WHEN p.data_pagamento IS NULL THEN 'Sem Pagamento'
+
+                WHEN date_diff(
+                    'day',
+                    f.data_vencimento,
+                    p.data_pagamento
+                ) > 0 THEN 'Pago em Atraso'
+
+                WHEN COALESCE(p.valor_pagamento, 0)
+                     < f.valor_pagamento_minimo THEN 'Abaixo do Mínimo'
+
+                ELSE 'Pago no Prazo'
+            END AS status
+
+        FROM fat f
+        LEFT JOIN pag p
+            ON f.id_fatura = p.id_fatura
+           AND f.id_cliente = p.id_cliente
+           AND f.safra = p.safra
+    """).df()
 
     return df
 
