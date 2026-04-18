@@ -194,25 +194,69 @@ div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
 # HELPERS
 # ══════════════════════════════════════════════════════════════
 def brl(v):
-    if v is None or (isinstance(v, float) and np.isnan(v)): return "—"
-    if abs(v) >= 1e6: return f"R$ {v/1e6:.2f}M"
-    if abs(v) >= 1e3: return f"R$ {v/1e3:.1f}k"
-    return f"R$ {v:,.2f}"
+    try:
+        if v is None or pd.isna(v):
+            return "—"
+
+        v = float(v)
+
+        if abs(v) >= 1_000_000:
+            return f"R$ {v/1_000_000:.2f}M"
+
+        if abs(v) >= 1_000:
+            return f"R$ {v/1_000:.1f}k"
+
+        return f"R$ {v:,.2f}"
+
+    except:
+        return "R$ 0,00"
+
 
 def nn(v):
-    if v is None: return "—"
-    return f"{int(v):,}"
+    try:
+        if v is None or pd.isna(v):
+            return "—"
+
+        return f"{int(v):,}"
+
+    except:
+        return "0"
+
 
 LAYOUT = dict(
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="DM Sans", color="#4b5563"),
-    margin=dict(l=55, r=20, t=35, b=45),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(
+        family="DM Sans",
+        color="#94a3b8"
+    ),
+    margin=dict(
+        l=55,
+        r=20,
+        t=35,
+        b=45
+    ),
 )
+
+
 def ax(fig, y_prefix=""):
-    fig.update_xaxes(showgrid=False, tickfont=dict(color="#4b5563", size=10), linecolor="#0f1629")
-    fig.update_yaxes(showgrid=True, gridcolor="#0f1629", tickfont=dict(color="#4b5563", size=10),
-                     zeroline=False, tickprefix=y_prefix)
+    fig.update_xaxes(
+        showgrid=False,
+        tickfont=dict(color="#94a3b8", size=10),
+        linecolor="#0f1629"
+    )
+
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor="#0f1629",
+        tickfont=dict(color="#94a3b8", size=10),
+        zeroline=False,
+        tickprefix=y_prefix
+    )
+
     return fig
+
+
 
 STATUS_COLORS = {
     "Pago no Prazo":    "#4a74de",
