@@ -30,8 +30,8 @@ st.set_page_config(
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    base_fat = "trusted/tb_faturas"
-    base_pag = "trusted/tb_pagamentos"
+    base_fat = "tb_faturas"
+    base_pag = "tb_pagamentos"
 
     # Lista todas as pastas safra=YYYY-MM
     safras_fat = [d for d in os.listdir(base_fat) if d.startswith("safra=")]
