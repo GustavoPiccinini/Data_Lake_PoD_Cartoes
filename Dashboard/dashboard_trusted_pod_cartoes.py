@@ -7,6 +7,7 @@ Execute: streamlit run dashboard_trusted_pod_cartoes.py
 """
 
 import io
+import os
 import json
 import streamlit as st
 import pandas as pd
@@ -30,8 +31,10 @@ st.set_page_config(
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    base_fat = "tb_faturas"
-    base_pag = "tb_pagamentos"
+    import os
+    base_dir = os.path.dirname(__file__)  # garante que pega a pasta do .py
+    base_fat = os.path.join(base_dir, "tb_faturas")
+    base_pag = os.path.join(base_dir, "tb_pagamentos")
 
     # Lista todas as pastas safra=YYYY-MM
     safras_fat = [d for d in os.listdir(base_fat) if d.startswith("safra=")]
