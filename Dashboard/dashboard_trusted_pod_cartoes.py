@@ -135,8 +135,8 @@ def ax(fig):
 
 STATUS_COLORS = {
     "Pagamento no Prazo":    "#0C1EE9",
-    "Pagamento em Atraso":   "#14026b",
-    "Abaixo do Mínimo": "#6B0303",
+    "Pago em Atraso":   "#14026b",
+    "Pgto Abaixo do Mínimo": "#6B0303",
     "Sem Pagamento":    "#450101",
 }
 
@@ -195,8 +195,8 @@ def init_db() -> duckdb.DuckDBPyConnection:
             CASE
                 WHEN p.data_pagamento IS NULL                               THEN 'Sem Pagamento'
                 WHEN DATEDIFF('day', f.data_vencimento, p.data_pagamento) > 0 THEN 'Pago em Atraso'
-                WHEN COALESCE(p.valor_pagamento, 0) < f.valor_pagamento_minimo THEN 'Abaixo do Mínimo'
-                ELSE 'Pago no Prazo'
+                WHEN COALESCE(p.valor_pagamento, 0) < f.valor_pagamento_minimo THEN 'Pgto Abaixo do Mínimo'
+                ELSE 'Pagamento no Prazo'
             END AS status
         FROM tb_faturas f
         LEFT JOIN tb_pagamentos p
@@ -238,7 +238,7 @@ def get_kpis(safras: tuple) -> dict:
             SUM(f.valor_fatura)                                              AS vol_faturado,
             (SELECT COUNT(DISTINCT id_cliente) FROM tb_pagamentos WHERE {w}) AS n_pagantes,
             (SELECT SUM(valor_pagamento) FROM tb_pagamentos WHERE {w})       AS vol_pago,
-            SUM(CASE WHEN j.status != 'Pago no Prazo' THEN 1 ELSE 0 END)
+            SUM(CASE WHEN j.status != 'Pagamento no Prazo' THEN 1 ELSE 0 END)
                 * 100.0 / NULLIF(COUNT(*), 0)                                AS taxa_inad
         FROM tb_faturas f
         JOIN vw_join j USING (id_fatura, id_cliente, safra)
@@ -257,8 +257,8 @@ def get_por_safra(safras: tuple) -> pd.DataFrame:
             SUM(j.valor_fatura)                                                     AS vol_fat,
             SUM(j.valor_pagamento)                                                  AS vol_pag,
             ROUND(SUM(j.valor_pagamento)*100.0/NULLIF(SUM(j.valor_fatura),0), 1)   AS cob_pct,
-            SUM(CASE WHEN j.status != 'Pago no Prazo' THEN 1 ELSE 0 END)           AS inadimplentes,
-            ROUND(SUM(CASE WHEN j.status != 'Pago no Prazo' THEN 1 ELSE 0 END)
+            SUM(CASE WHEN j.status != 'Pagamento no Prazo' THEN 1 ELSE 0 END)           AS inadimplentes,
+            ROUND(SUM(CASE WHEN j.status != 'Pagamento no Prazo' THEN 1 ELSE 0 END)
                   *100.0/NULLIF(COUNT(*),0), 1)                                     AS taxa_inad
         FROM vw_join j WHERE j.{w}
         GROUP BY j.safra ORDER BY j.safra
@@ -341,7 +341,7 @@ def get_top_inad(safras: tuple) -> pd.DataFrame:
             SUM(valor_fatura)   AS vol_risco,
             MAX(status)         AS status_principal
         FROM vw_join
-        WHERE {w} AND status != 'Pago no Prazo'
+        WHERE {w} AND status != 'Pagamento no Prazo'
         GROUP BY id_cliente ORDER BY vol_risco DESC
         LIMIT 20
     """).df()
@@ -735,8 +735,8 @@ with tab_inad:
     df_top    = get_top_inad(safras_key)
 
     n_total  = int(df_st_i["qtd"].sum())
-    n_inad   = int(df_st_i.loc[df_st_i["status"] != "Pago no Prazo","qtd"].sum())
-    vol_inad = float(df_st_i.loc[df_st_i["status"] != "Pago no Prazo","volume"].sum())
+    n_inad   = int(df_st_i.loc[df_st_i["status"] != "Pagamento no Prazo","qtd"].sum())
+    vol_inad = float(df_st_i.loc[df_st_i["status"] != "Pagamento no Prazo","volume"].sum())
     vol_sp   = float(df_st_i.loc[df_st_i["status"] == "Sem Pagamento","volume"].sum()) if "Sem Pagamento" in df_st_i["status"].values else 0
     taxa_i   = n_inad / n_total * 100 if n_total else 0
 
