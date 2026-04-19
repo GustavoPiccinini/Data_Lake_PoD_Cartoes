@@ -494,7 +494,7 @@ tab_exec, tab_fat_aba, tab_pag_aba, tab_inad, tab_quality, tab_cliente = st.tabs
     "|   Faturas   |",
     "|   Pagamentos   |",
     "|   Inadimplência   |",
-    "|   Qualidade   |",
+    "|   Qualidade dos Dados   |",
     "|   Perfil do Cliente   |",
 ]) 
 
@@ -672,8 +672,8 @@ with tab_pag_aba:
 
     kp1,kp2,kp3,kp4 = st.columns(4)
     kp1.metric("Volume Total Pago",  brl(kpis_p["vol_pago"]))
-    kp2.metric("Mediana Pagamento",  brl(df_hp["valor_pagamento"].median()))
-    kp3.metric("Registros de Pgto.", nn(len(df_hp)))
+    kp2.metric("Média de Pagamento",  brl(df_hp["valor_pagamento"].mean()))
+    kp3.metric("Quantidade de Pgto.", nn(len(df_hp)))
     kp4.metric("Clientes Pagantes",  nn(kpis_p["n_pagantes"]))
 
     st.markdown("")
@@ -724,9 +724,7 @@ with tab_pag_aba:
                                   font=dict(color="#385d90"),
                                   legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         st.plotly_chart(fig_ag_pie, use_container_width=True)
-        st.metric("Media de dias ", f"{df_aging['dias_atraso'].median():.0f}")
-        st.metric("Dias",     f"{df_aging['dias_atraso'].quantile(0.75):.0f}")
-
+    
 # ══════════════════════════════════════════════════════════════
 # ABA 4 — INADIMPLÊNCIA
 # ══════════════════════════════════════════════════════════════
@@ -829,7 +827,7 @@ with tab_inad:
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ══════════════════════════════════════════════════════════════
-# ABA 5 — QUALIDADE DE DADOS
+# ABA 5 — QUALIDADE DOS DADOS
 # ══════════════════════════════════════════════════════════════
 with tab_quality:
 
