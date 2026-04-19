@@ -1028,7 +1028,7 @@ with tab_cliente:
             fig_tl = go.Figure()
             df_fat_g = df_cli_fat.groupby("safra")["valor_fatura"].sum().reset_index()
             fig_tl.add_trace(go.Bar(x=df_fat_g["safra"], y=df_fat_g["valor_fatura"],
-                                     name="Fatura", marker_color="#031e3e",
+                                     name="Fatura", marker_color="#83aee2",
                                      text=[brl(v) for v in df_fat_g["valor_fatura"]],
                                      textposition="outside", textfont=dict(size=9)))
             if not df_cli_pag.empty:
@@ -1036,7 +1036,7 @@ with tab_cliente:
                             .assign(safra=df_cli_pag["data_pagamento"].astype(str).str[:7])
                             .groupby("safra")["valor_pagamento"].sum().reset_index())
                 fig_tl.add_trace(go.Bar(x=df_pag_g["safra"], y=df_pag_g["valor_pagamento"],
-                                         name="Pago", marker_color="#040780",
+                                         name="Pago", marker_color="#090241",
                                          text=[brl(v) for v in df_pag_g["valor_pagamento"]],
                                          textposition="outside", textfont=dict(size=9)))
             fig_tl.update_layout(height=240, barmode="group",
