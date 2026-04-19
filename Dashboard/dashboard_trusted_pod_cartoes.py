@@ -1,140 +1,44 @@
 """
 Dashboard — Camada Trusted · PoD Cartões
-Projeto: Data Lake 
+Projeto: Data Lake 2024 · Engenharia de Dados Júnior · PoD Academy
 
-Dados disponiveis para analise .
+Arquitetura de performance:
+  - DuckDB como engine central (in-process, sem pandas no critical path)
+  - @st.cache_resource: conexão DuckDB persiste entre reruns
+  - @st.cache_data: resultados de queries pesadas cacheados por safra
+  - Consulta de cliente via SQL parametrizado (ms, não segundos)
+  - DataFrames pandas apenas para renderização final
+
 Execute: streamlit run dashboard_trusted_pod_cartoes.py
 """
+
 import io
-import json
 import os
+import random
 
-import streamlit as st
 import duckdb
-import pandas as pd
 import numpy as np
-
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-
+import streamlit as st
 
 # ══════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="PoD Cartões - Trusted Layer",
+    page_title="PoD Cartões · Trusted Layer",
     page_icon="💳",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # ══════════════════════════════════════════════════════════════
-# LEITURA DOS DADOS DO DATA LAKE
-# ══════════════════════════════════════════════════════════════
-@st.cache_data(show_spinner=False)
-def load_data():
-
-    base_dir = os.path.dirname(__file__)
-
-    db = duckdb.connect()
-
-    fat_path = os.path.join(
-        base_dir,
-        "tb_faturas",
-        "*",
-        "*.parquet"
-    ).replace("\\", "/")
-
-    pag_path = os.path.join(
-        base_dir,
-        "tb_pagamentos",
-        "*",
-        "*.parquet"
-    ).replace("\\", "/")
-
-    df_fat = db.execute(f"""
-        SELECT
-            *,
-            regexp_extract(filename,'ref=([0-9]+)',1) AS safra
-        FROM read_parquet('{fat_path}', filename=true)
-    """).df()
-
-    df_pag = db.execute(f"""
-        SELECT
-            *,
-            regexp_extract(filename,'ref=([0-9]+)',1) AS safra
-        FROM read_parquet('{pag_path}', filename=true)
-    """).df()
-
-    df_fat["data_emissao"] = pd.to_datetime(df_fat["data_emissao"])
-    df_fat["data_vencimento"] = pd.to_datetime(df_fat["data_vencimento"])
-    df_pag["data_pagamento"] = pd.to_datetime(df_pag["data_pagamento"])
-
-    return df_fat, df_pag
-
-
-df_fat, df_pag = load_data()
-
-
-# ══════════════════════════════════════════════════════════════
-# JOIN COMPLETO
-# ══════════════════════════════════════════════════════════════
-@st.cache_data(show_spinner=False)
-def build_join(fat, pag):
-
-    db = duckdb.connect()
-
-    db.register("fat", fat)
-    db.register("pag", pag)
-
-    df = db.execute("""
-        SELECT
-            f.*,
-            p.data_pagamento,
-            COALESCE(p.valor_pagamento, 0) AS valor_pagamento,
-
-            COALESCE(
-                date_diff(
-                    'day',
-                    f.data_vencimento,
-                    p.data_pagamento
-                ),
-                0
-            ) AS dias_atraso,
-
-            CASE
-                WHEN p.data_pagamento IS NULL THEN 'Sem Pagamento'
-
-                WHEN date_diff(
-                    'day',
-                    f.data_vencimento,
-                    p.data_pagamento
-                ) > 0 THEN 'Pago em Atraso'
-
-                WHEN COALESCE(p.valor_pagamento, 0)
-                     < f.valor_pagamento_minimo THEN 'Abaixo do Mínimo'
-
-                ELSE 'Pago no Prazo'
-            END AS status
-
-        FROM fat f
-        LEFT JOIN pag p
-            ON f.id_fatura = p.id_fatura
-           AND f.id_cliente = p.id_cliente
-           AND f.safra = p.safra
-    """).df()
-
-    return df
-
-
-df_join = build_join(df_fat, df_pag)
-
-# ══════════════════════════════════════════════════════════════
 # ESTILO
 # ══════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 .stApp { background: #060810; }
@@ -173,7 +77,6 @@ button[data-baseweb="tab"] {
 button[data-baseweb="tab"][aria-selected="true"] {
     background: #0f1629 !important; color: #e2e8f0 !important;
 }
-
 h1, h2, h3 { color: #e2e8f0 !important; }
 
 .sec { border-left: 3px solid #1d4ed8; padding-left: 12px;
@@ -184,8 +87,6 @@ h1, h2, h3 { color: #e2e8f0 !important; }
          font-size:0.68rem; font-weight:600; font-family:'IBM Plex Mono',monospace; letter-spacing:.04em; }
 .b-blue  { background:#172554; color:#60a5fa; border:1px solid #1e3a8a; }
 .b-green { background:#052e16; color:#4ade80; border:1px solid #166534; }
-.b-red   { background:#3b0764; color:#e879f9; border:1px solid #6b21a8; }
-.b-amber { background:#431407; color:#fb923c; border:1px solid #9a3412; }
 
 .info-box { background:#0c1222; border:1px solid #141e38; border-radius:8px;
             padding:12px 16px; margin-bottom:1rem; }
@@ -201,7 +102,7 @@ div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
 # ══════════════════════════════════════════════════════════════
 def brl(v):
     try:
-        if v is None or pd.isna(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
             return "—"
         v = float(v)
         if abs(v) >= 1_000_000:
@@ -209,54 +110,311 @@ def brl(v):
         if abs(v) >= 1_000:
             return f"R$ {v/1_000:.1f}k"
         return f"R$ {v:,.2f}"
-    except:
-        return "R$ 0,00"
+    except Exception:
+        return "—"
+
 def nn(v):
     try:
-        if v is None or pd.isna(v):
+        if v is None:
             return "—"
         return f"{int(v):,}"
-    except:
-        return "0"
+    except Exception:
+        return "—"
 
 LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(
-        family="DM Sans",
-        color="#94a3b8"
-    ),
-    margin=dict(
-        l=55,
-        r=20,
-        t=35,
-        b=45
-    ),
+    font=dict(family="DM Sans", color="#084292"),
+    margin=dict(l=55, r=20, t=35, b=45),
 )
 
-def ax(fig, y_prefix=""):
-    fig.update_xaxes(
-        showgrid=False,
-        tickfont=dict(color="#94a3b8", size=10),
-        linecolor="#0f1629"
-    )
-
-    fig.update_yaxes(
-        showgrid=True,
-        gridcolor="#0f1629",
-        tickfont=dict(color="#94a3b8", size=10),
-        zeroline=False,
-        tickprefix=y_prefix
-    )
-
+def ax(fig):
+    fig.update_xaxes(showgrid=False, tickfont=dict(color="#1a304e", size=10), linecolor="#0f1629")
+    fig.update_yaxes(showgrid=True, gridcolor="#0f1629", tickfont=dict(color="#16253a", size=10), zeroline=False)
     return fig
 
 STATUS_COLORS = {
-    "Pago no Prazo":    "#4a74de",
-    "Pago em Atraso":   "#b83cfb",
-    "Abaixo do Mínimo": "#ba24fb",
-    "Sem Pagamento":    "#7b3ff4",
+    "Pago no Prazo":    "#111735",
+    "Pago em Atraso":   "#39060a",
+    "Abaixo do Mínimo": "#350421",
+    "Sem Pagamento":    "#620413",
 }
+
+# ══════════════════════════════════════════════════════════════
+# DUCKDB — conexão única persistida via cache_resource
+# cache_resource = criada UMA vez, reutilizada em todos os reruns
+# ══════════════════════════════════════════════════════════════
+@st.cache_resource
+def init_db() -> duckdb.DuckDBPyConnection:
+    base = os.path.dirname(os.path.abspath(__file__))
+    con  = duckdb.connect()
+
+    fat_path = os.path.join(base, "tb_faturas",    "*", "*.parquet").replace("\\", "/")
+    pag_path = os.path.join(base, "tb_pagamentos", "*", "*.parquet").replace("\\", "/")
+
+    # Tipos explícitos na view — zero conversão no runtime
+    con.execute(f"""
+        CREATE OR REPLACE VIEW tb_faturas AS
+        SELECT
+            CAST(id_fatura              AS BIGINT)  AS id_fatura,
+            CAST(id_cliente             AS BIGINT)  AS id_cliente,
+            CAST(data_emissao           AS DATE)    AS data_emissao,
+            CAST(data_vencimento        AS DATE)    AS data_vencimento,
+            CAST(valor_fatura           AS DOUBLE)  AS valor_fatura,
+            CAST(valor_pagamento_minimo AS DOUBLE)  AS valor_pagamento_minimo,
+            regexp_extract(filename, 'ref=([^/\\\\]+)', 1) AS safra
+        FROM read_parquet('{fat_path}', filename=true, union_by_name=true)
+    """)
+
+    con.execute(f"""
+        CREATE OR REPLACE VIEW tb_pagamentos AS
+        SELECT
+            CAST(id_pagamento   AS BIGINT)  AS id_pagamento,
+            CAST(id_fatura      AS BIGINT)  AS id_fatura,
+            CAST(id_cliente     AS BIGINT)  AS id_cliente,
+            CAST(data_pagamento AS DATE)    AS data_pagamento,
+            CAST(valor_pagamento AS DOUBLE) AS valor_pagamento,
+            regexp_extract(filename, 'ref=([^/\\\\]+)', 1) AS safra
+        FROM read_parquet('{pag_path}', filename=true, union_by_name=true)
+    """)
+
+    # View join — calculada uma vez pelo DuckDB, memoizada
+    con.execute("""
+        CREATE OR REPLACE VIEW vw_join AS
+        SELECT
+            f.id_fatura,
+            f.id_cliente,
+            f.safra,
+            f.data_emissao,
+            f.data_vencimento,
+            f.valor_fatura,
+            f.valor_pagamento_minimo,
+            p.data_pagamento,
+            COALESCE(p.valor_pagamento, 0)                          AS valor_pagamento,
+            DATEDIFF('day', f.data_vencimento, p.data_pagamento)    AS dias_atraso,
+            CASE
+                WHEN p.data_pagamento IS NULL                               THEN 'Sem Pagamento'
+                WHEN DATEDIFF('day', f.data_vencimento, p.data_pagamento) > 0 THEN 'Pago em Atraso'
+                WHEN COALESCE(p.valor_pagamento, 0) < f.valor_pagamento_minimo THEN 'Abaixo do Mínimo'
+                ELSE 'Pago no Prazo'
+            END AS status
+        FROM tb_faturas f
+        LEFT JOIN tb_pagamentos p
+               ON f.id_fatura  = p.id_fatura
+              AND f.id_cliente = p.id_cliente
+    """)
+
+    return con
+
+
+# ── Accessors ──
+def q(sql: str) -> pd.DataFrame:
+    return con.execute(sql).df()
+
+def q1(sql: str):
+    r = con.execute(sql).fetchone()
+    return r[0] if r else None
+
+
+# ══════════════════════════════════════════════════════════════
+# QUERIES CACHEADAS POR SAFRA
+# Cada função recebe safras como tuple (imutável = boa chave de cache).
+# Resultado fica em memória — zero I/O no rerun.
+# ══════════════════════════════════════════════════════════════
+def wf(safras: tuple) -> str:
+    """WHERE clause para filtrar safras."""
+    if not safras:
+        return "1=1"
+    lst = ", ".join(f"'{s}'" for s in safras)
+    return f"safra IN ({lst})"
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_kpis(safras: tuple) -> dict:
+    w = wf(safras)
+    row = con.execute(f"""
+        SELECT
+            COUNT(DISTINCT f.id_cliente)                                    AS n_clientes,
+            COUNT(*)                                                         AS n_faturas,
+            SUM(f.valor_fatura)                                              AS vol_faturado,
+            (SELECT COUNT(DISTINCT id_cliente) FROM tb_pagamentos WHERE {w}) AS n_pagantes,
+            (SELECT SUM(valor_pagamento) FROM tb_pagamentos WHERE {w})       AS vol_pago,
+            SUM(CASE WHEN j.status != 'Pago no Prazo' THEN 1 ELSE 0 END)
+                * 100.0 / NULLIF(COUNT(*), 0)                                AS taxa_inad
+        FROM tb_faturas f
+        JOIN vw_join j USING (id_fatura, id_cliente, safra)
+        WHERE f.{w}
+    """).fetchone()
+    return dict(zip(["n_clientes","n_faturas","vol_faturado","n_pagantes","vol_pago","taxa_inad"], row))
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_por_safra(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"""
+        SELECT
+            j.safra,
+            COUNT(*)                                                                AS n_fat,
+            COUNT(DISTINCT j.id_cliente)                                            AS n_cli,
+            SUM(j.valor_fatura)                                                     AS vol_fat,
+            SUM(j.valor_pagamento)                                                  AS vol_pag,
+            ROUND(SUM(j.valor_pagamento)*100.0/NULLIF(SUM(j.valor_fatura),0), 1)   AS cob_pct,
+            SUM(CASE WHEN j.status != 'Pago no Prazo' THEN 1 ELSE 0 END)           AS inadimplentes,
+            ROUND(SUM(CASE WHEN j.status != 'Pago no Prazo' THEN 1 ELSE 0 END)
+                  *100.0/NULLIF(COUNT(*),0), 1)                                     AS taxa_inad
+        FROM vw_join j WHERE j.{w}
+        GROUP BY j.safra ORDER BY j.safra
+    """).df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_status_counts(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"""
+        SELECT status, COUNT(*) AS qtd, SUM(valor_fatura) AS volume
+        FROM vw_join WHERE {w}
+        GROUP BY status ORDER BY qtd DESC
+    """).df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_hist_fatura(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"SELECT valor_fatura FROM tb_faturas WHERE {w}").df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_scatter_fat(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"""
+        SELECT valor_fatura, valor_pagamento_minimo
+        FROM tb_faturas WHERE {w} USING SAMPLE 1500
+    """).df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_faixas(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"""
+        SELECT
+            CASE
+                WHEN valor_fatura <  5000 THEN '< R$5k'
+                WHEN valor_fatura < 15000 THEN 'R$5k–15k'
+                WHEN valor_fatura < 30000 THEN 'R$15k–30k'
+                WHEN valor_fatura < 50000 THEN 'R$30k–50k'
+                ELSE '> R$50k'
+            END AS faixa,
+            COUNT(*) AS qtd
+        FROM tb_faturas WHERE {w}
+        GROUP BY 1 ORDER BY MIN(valor_fatura)
+    """).df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_percentis_fatura(safras: tuple) -> dict:
+    w = wf(safras)
+    row = con.execute(f"""
+        SELECT
+            PERCENTILE_CONT(0.10) WITHIN GROUP (ORDER BY valor_fatura),
+            PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY valor_fatura),
+            PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY valor_fatura),
+            PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY valor_fatura),
+            PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY valor_fatura),
+            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY valor_fatura)
+        FROM tb_faturas WHERE {w}
+    """).fetchone()
+    return dict(zip(["P10","P25","P50","P75","P90","P99"], row))
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_hist_pagamento(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"SELECT valor_pagamento FROM tb_pagamentos WHERE {w}").df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_aging(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"""
+        SELECT dias_atraso, status FROM vw_join
+        WHERE {w} AND dias_atraso IS NOT NULL
+    """).df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_top_inad(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"""
+        SELECT
+            id_cliente,
+            COUNT(*)            AS faturas_inad,
+            SUM(valor_fatura)   AS vol_risco,
+            MAX(status)         AS status_principal
+        FROM vw_join
+        WHERE {w} AND status != 'Pago no Prazo'
+        GROUP BY id_cliente ORDER BY vol_risco DESC
+        LIMIT 20
+    """).df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_nulls(safras: tuple) -> tuple:
+    w = wf(safras)
+    df_nf = con.execute(f"""
+        SELECT 'id_fatura'             AS col, COUNT(*)-COUNT(id_fatura)             AS nulos, COUNT(*) AS total FROM tb_faturas WHERE {w} UNION ALL
+        SELECT 'id_cliente',                   COUNT(*)-COUNT(id_cliente),                    COUNT(*) FROM tb_faturas WHERE {w} UNION ALL
+        SELECT 'data_emissao',                 COUNT(*)-COUNT(data_emissao),                  COUNT(*) FROM tb_faturas WHERE {w} UNION ALL
+        SELECT 'data_vencimento',              COUNT(*)-COUNT(data_vencimento),               COUNT(*) FROM tb_faturas WHERE {w} UNION ALL
+        SELECT 'valor_fatura',                 COUNT(*)-COUNT(valor_fatura),                  COUNT(*) FROM tb_faturas WHERE {w} UNION ALL
+        SELECT 'valor_pagamento_minimo',       COUNT(*)-COUNT(valor_pagamento_minimo),        COUNT(*) FROM tb_faturas WHERE {w}
+    """).df()
+    df_np = con.execute(f"""
+        SELECT 'id_pagamento'  AS col, COUNT(*)-COUNT(id_pagamento)  AS nulos, COUNT(*) AS total FROM tb_pagamentos WHERE {w} UNION ALL
+        SELECT 'id_fatura',            COUNT(*)-COUNT(id_fatura),            COUNT(*) FROM tb_pagamentos WHERE {w} UNION ALL
+        SELECT 'id_cliente',           COUNT(*)-COUNT(id_cliente),           COUNT(*) FROM tb_pagamentos WHERE {w} UNION ALL
+        SELECT 'data_pagamento',       COUNT(*)-COUNT(data_pagamento),       COUNT(*) FROM tb_pagamentos WHERE {w} UNION ALL
+        SELECT 'valor_pagamento',      COUNT(*)-COUNT(valor_pagamento),      COUNT(*) FROM tb_pagamentos WHERE {w}
+    """).df()
+    return df_nf, df_np
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_duplicatas(safras: tuple) -> tuple:
+    w = wf(safras)
+    dup_fat = q1(f"SELECT COUNT(*)-COUNT(DISTINCT id_fatura||'-'||CAST(id_cliente AS VARCHAR)) FROM tb_faturas WHERE {w}")
+    dup_pag = q1(f"SELECT COUNT(*)-COUNT(DISTINCT id_pagamento||'-'||CAST(id_cliente AS VARCHAR)) FROM tb_pagamentos WHERE {w}")
+    return int(dup_fat or 0), int(dup_pag or 0)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_ref_integridade(safras: tuple) -> pd.DataFrame:
+    w = wf(safras)
+    return con.execute(f"""
+        SELECT f.safra,
+               COUNT(*) AS total_fat,
+               SUM(CASE WHEN p.id_fatura IS NULL THEN 1 ELSE 0 END) AS sem_pag,
+               ROUND(SUM(CASE WHEN p.id_fatura IS NULL THEN 1 ELSE 0 END)*100.0/COUNT(*),1) AS pct_sem_pag
+        FROM tb_faturas f
+        LEFT JOIN tb_pagamentos p ON f.id_fatura=p.id_fatura AND f.id_cliente=p.id_cliente
+        WHERE f.{w} GROUP BY f.safra ORDER BY f.safra
+    """).df()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_lista_clientes() -> list:
+    return con.execute("SELECT DISTINCT id_cliente FROM tb_faturas ORDER BY id_cliente").df()["id_cliente"].tolist()
+
+# ── Cliente: query parametrizada — DuckDB resolve em <10ms
+def get_cliente_fat(id_cli: int) -> pd.DataFrame:
+    return con.execute(f"""
+        SELECT safra, data_emissao, data_vencimento, valor_fatura, valor_pagamento_minimo
+        FROM tb_faturas WHERE id_cliente = {id_cli} ORDER BY data_emissao
+    """).df()
+
+def get_cliente_pag(id_cli: int) -> pd.DataFrame:
+    return con.execute(f"""
+        SELECT data_pagamento, valor_pagamento, id_fatura
+        FROM tb_pagamentos WHERE id_cliente = {id_cli} ORDER BY data_pagamento
+    """).df()
+
+def get_cliente_status(id_cli: int) -> pd.DataFrame:
+    return con.execute(f"""
+        SELECT status, COUNT(*) AS qtd, SUM(valor_fatura) AS volume
+        FROM vw_join WHERE id_cliente = {id_cli} GROUP BY status
+    """).df()
+
+
+# ══════════════════════════════════════════════════════════════
+# INICIALIZAÇÃO
+# ══════════════════════════════════════════════════════════════
+con = init_db()
+safras_disp = sorted(q("SELECT DISTINCT safra FROM tb_faturas ORDER BY safra")["safra"].tolist())
 
 # ══════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -268,7 +426,7 @@ with st.sidebar:
         💳 PoD Cartões
       </div>
       <div style='color:#1f2937;font-size:0.7rem;margin-top:3px;'>
-        Data Lake 2024 · Engenharia de Dados Jr
+        Data Lake 
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -280,79 +438,50 @@ with st.sidebar:
       <div class='body'>
         Dados tratados, tipados e deduplicados.<br>
         Particionados por <b style='color:#6b7280'>safra mensal</b>.<br>
-        Leitura via <b style='color:#6b7280'>DuckDB + Parquet</b>.<br>
-        Ingestão: <b style='color:#6b7280'>S3 → PySpark → Trusted</b>.
+        Engine: <b style='color:#6b7280'>DuckDB · Parquet</b>.<br>
+        Pipeline: <b style='color:#6b7280'>S3 → PySpark → Trusted</b>.
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("#### 📅 Referências disponíveis")
-    safras_disp = sorted(df_fat["safra"].unique().tolist())
-    safras_sel  = st.multiselect("", options=safras_disp, default=safras_disp)
+    safras_sel = st.multiselect("", options=safras_disp, default=safras_disp)
     if not safras_sel:
         safras_sel = safras_disp
+
+    safras_key = tuple(sorted(safras_sel))
 
     st.markdown("---")
     st.markdown("""
     <div style='font-size:0.68rem;color:#1f2937;line-height:1.9;'>
       <b style='color:#374151'>Tabelas:</b> tb_faturas · tb_pagamentos<br>
-      <b style='color:#374151'>Registros:</b> 10.000 fat · 5.780 pag<br>
-      <b style='color:#374151'>Clientes:</b> 10.000<br>
-      <b style='color:#374151'>Safra ref.:</b> 2023-01<br>
       <b style='color:#374151'>Data ref.:</b> 2024-02-01<br>
       <b style='color:#374151'>Fonte:</b> S3 · sa-east-1
     </div>
     """, unsafe_allow_html=True)
 
-# ── Filtra pelo multiselect ──
-df_fat_f  = df_fat[df_fat["safra"].isin(safras_sel)]
-df_pag_f = df_pag[df_pag["safra"].isin(safras_sel)]
-df_join_f = df_join[df_join["safra"].isin(safras_sel)]
-
 # ══════════════════════════════════════════════════════════════
 # HEADER
 # ══════════════════════════════════════════════════════════════
-ref_min = min(safras_sel)
-ref_max = max(safras_sel)
-
 hc1, hc2 = st.columns([4, 1])
-
 with hc1:
-    st.markdown(f"""
-    <h1 style='font-family:IBM Plex Mono, monospace;
-               font-size:1.65rem;
-               margin-bottom:2px;
-               letter-spacing:-0.01em;
-               color:#e2e8f0;'>
-
+    st.markdown("""
+    <h1 style='font-family:IBM Plex Mono,monospace;font-size:1.65rem;margin-bottom:2px;'>
       💳 PoD Cartões — Camada Trusted
     </h1>
-
-    <p style='color:#94a3b8;
-              font-size:0.82rem;
-              margin:0;'>
-
-      Dados financeiros de faturas e pagamentos · Projeto Data Lake
+    <p style='color:#94a3b8;font-size:0.82rem;margin:0;'>
+      Dados financeiros de faturas e pagamentos · Projeto Data Lake 
     </p>
     """, unsafe_allow_html=True)
-
 with hc2:
+    ref_min = min(safras_sel)
+    ref_max = max(safras_sel)
     st.markdown(f"""
-    <div style='text-align:right;
-                padding-top:12px;'>
-
+    <div style='text-align:right;padding-top:12px;'>
       <span class='badge b-blue'>Trusted Layer</span>&nbsp;
       <span class='badge b-green'>ref {ref_min}</span>
-
     </div>
-
-    <div style='text-align:right;
-                margin-top:6px;
-                font-size:0.70rem;
-                color:#64748b;'>
-
-      até {ref_max}
-    </div>
+    <div style='text-align:right;margin-top:4px;font-size:0.7rem;color:#374151;'>até {ref_max}</div>
     """, unsafe_allow_html=True)
 
 st.markdown("---")
@@ -360,282 +489,123 @@ st.markdown("---")
 # ══════════════════════════════════════════════════════════════
 # ABAS
 # ══════════════════════════════════════════════════════════════
-tab_exec, tab_fat, tab_pag, tab_inad, tab_quality, tab_cliente = st.tabs([
-    "🏠 Visão Geral",
-    "📄 Faturas",
-    "💸 Pagamentos",
-    "🚨 Inadimplência",
-    "🔬 Qualidade de Dados",
-    "🔍 Perfil do Cliente",
-])
+tab_exec, tab_fat_aba, tab_pag_aba, tab_inad, tab_quality, tab_cliente = st.tabs([
+    "| Visão Geral |",
+    "| Faturas |",
+    "| Pagamentos |",
+    "| Inadimplência |",
+    "| Qualidade |",
+    "| Perfil do Cliente |",
+]) 
 
 # ══════════════════════════════════════════════════════════════
 # ABA 1 — VISÃO GERAL
 # ══════════════════════════════════════════════════════════════
 with tab_exec:
 
-    # ═══════════════════════════════════════
-    # GARANTE CAMPOS NUMÉRICOS
-    # ═══════════════════════════════════════
-    df_fat_f["valor_fatura"] = pd.to_numeric(
-        df_fat_f["valor_fatura"], errors="coerce").fillna(0)
+    kpis      = get_kpis(safras_key)
+    df_safra  = get_por_safra(safras_key)
+    df_status = get_status_counts(safras_key)
 
-    df_fat_f["valor_pagamento_minimo"] = pd.to_numeric(
-        df_fat_f["valor_pagamento_minimo"], errors="coerce").fillna(0)
+    k1,k2,k3,k4,k5,k6 = st.columns(6)
+    k1.metric("Clientes",          nn(kpis["n_clientes"]))
+    k2.metric("Faturas emitidas",  nn(kpis["n_faturas"]))
+    k3.metric("Volume faturado",   brl(kpis["vol_faturado"]))
+    k4.metric("Volume pago",       brl(kpis["vol_pago"]))
+    k5.metric("Clientes pagantes", nn(kpis["n_pagantes"]))
+    taxa = float(kpis["taxa_inad"] or 0)
+    k6.metric("Taxa inadimplência", f"{taxa:.1f}%",
+              delta="⚠️ atenção" if taxa > 40 else "✅ controlada", delta_color="inverse")
 
-    df_pag_f["valor_pagamento"] = pd.to_numeric(
-        df_pag_f["valor_pagamento"], errors="coerce"
-    ).fillna(0)
-
-    # ═══════════════════════════════════════
-    # KPIs
-    # ═══════════════════════════════════════
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    vol_fat = df_fat_f["valor_fatura"].sum()
-    vol_pag = df_pag_f["valor_pagamento"].sum()
-    pct_pag = (
-        df_join_f["data_pagamento"].notna().sum()
-        / len(df_join_f) * 100
-    ) if len(df_join_f) else 0
-    inad_pct = (
-        df_join_f["status"].isin(
-            [
-                "Sem Pagamento",
-                "Pago em Atraso",
-                "Abaixo do Mínimo"
-            ]
-        ).sum()
-        / len(df_join_f) * 100)if len(df_join_f) else 0
-    k1.metric("Clientes",nn(df_fat_f["id_cliente"].nunique()))
-    k2.metric("Faturas emitidas",nn(len(df_fat_f)))
-    k3.metric(  "Volume faturado",brl(vol_fat))
-    k4.metric( "Volume pago", brl(vol_pag) )
-    k5.metric("% Clientes pagaram",f"{pct_pag:.1f}%")
-    k6.metric("Taxa inadimplência",f"{inad_pct:.1f}%",delta="⚠️ atenção" if inad_pct > 40 else "✅ controlada",delta_color="inverse")
     st.markdown("")
-    st.markdown(
-        '<div class="sec">Volume Faturado vs Pago · por Referência</div>',
-        unsafe_allow_html=True)
-    df_safra = (
-        df_fat_f.groupby("safra")
-        .agg(
-            vol_fat=("valor_fatura", "sum"),
-            n_fat=("id_fatura", "count"),
-            n_cli=("id_cliente", "nunique")
-        )
-        .reset_index())
-    df_pag_safra = (df_pag_f.groupby("safra").agg(vol_pag=("valor_pagamento", "sum")).reset_index())
-    df_ev = (df_safra.merge(df_pag_safra,on="safra",how="left")
-        .fillna(0))
-    df_ev["cobertura_pct"] = np.where(df_ev["vol_fat"] > 0,(df_ev["vol_pag"] / df_ev["vol_fat"] * 100).round(1),0)
+    st.markdown('<div class="sec">Volume Faturado vs Pago · por Referência</div>', unsafe_allow_html=True)
     col_ev1, col_ev2 = st.columns(2)
-    with col_ev1:
 
+    with col_ev1:
         fig_vol = go.Figure()
-        fig_vol.add_trace(
-            go.Bar(
-                x=df_ev["safra"],
-                y=df_ev["vol_fat"],
-                name="Faturado",
-                marker_color="#60a5fa",
-                text=[brl(v) for v in df_ev["vol_fat"]],
-                textposition="outside"
-            )
-        )
-        fig_vol.add_trace(
-            go.Bar(
-                x=df_ev["safra"],
-                y=df_ev["vol_pag"],
-                name="Pago",
-                marker_color="#2a523a",
-                text=[brl(v) for v in df_ev["vol_pag"]],
-                textposition="outside"
-            )
-        )   
-        fig_vol.update_layout(
-            height=320,
-            barmode="group",
-            title_text="Volume Financeiro",
-            title_font=dict(size=12),
-            legend=dict(bgcolor="rgba(0,0,0,0)"),
-            **LAYOUT
-        )
+        fig_vol.add_trace(go.Bar(x=df_safra["safra"], y=df_safra["vol_fat"], name="Faturado",
+                                  marker_color="#365b88",
+                                  text=[brl(v) for v in df_safra["vol_fat"]],
+                                  textposition="outside", textfont=dict(size=9)))
+        fig_vol.add_trace(go.Bar(x=df_safra["safra"], y=df_safra["vol_pag"], name="Pago",
+                                  marker_color="#2d1f3c",
+                                  text=[brl(v) for v in df_safra["vol_pag"]],
+                                  textposition="outside", textfont=dict(size=9)))
+        fig_vol.update_layout(height=300, barmode="group",
+                               legend=dict(bgcolor="rgba(0,0,0,0)"), **LAYOUT)
         ax(fig_vol)
-        st.plotly_chart(
-            fig_vol,
-            use_container_width=True
-        )
+        st.plotly_chart(fig_vol, use_container_width=True)
+
     with col_ev2:
         fig_cob = go.Figure()
-        fig_cob.add_trace(go.Bar(x=df_ev["safra"], y=df_ev["cobertura_pct"],
+        fig_cob.add_trace(go.Bar(x=df_safra["safra"], y=df_safra["cob_pct"],
                                   marker_color="#7c3aed",
-                                  text=[f"{v}%" for v in df_ev["cobertura_pct"]],
-                                  textposition="outside", textfont=dict(size=9,color="#4b5563")))
-        fig_cob.add_hline(y=100, line_dash="dash", line_color="#1f2937", line_width=1)
-        fig_cob.update_layout(height=290, title_text="% Volume Pago / Faturado",
-                               title_font=dict(size=12,color="#6b7280"),
-                               yaxis_range=[0,115], showlegend=False, **LAYOUT)
+                                  text=[f"{v}%" for v in df_safra["cob_pct"]],
+                                  textposition="outside", textfont=dict(size=9)))
+        fig_cob.add_hline(y=100, line_dash="dash", line_color="#213048", line_width=1)
+        fig_cob.update_layout(height=300, yaxis_range=[0, 120], showlegend=False,
+                               title_text="% Volume Pago / Faturado",
+                               title_font=dict(size=12, color="#141d2a"), **LAYOUT)
         ax(fig_cob)
         st.plotly_chart(fig_cob, use_container_width=True)
 
-    # ═══════════════════════════════════════
-    # STATUS GERAL
-    # ═══════════════════════════════════════
-    st.markdown(
-        '<div class="sec">Distribuição de Status de Pagamento</div>',
-        unsafe_allow_html=True
-    )
-
+    st.markdown('<div class="sec">Distribuição de Status de Pagamento</div>', unsafe_allow_html=True)
     col_st1, col_st2 = st.columns([1, 2])
+    df_status["pct"] = (df_status["qtd"] / df_status["qtd"].sum() * 100).round(1)
 
-    status_vc = (
-        df_join_f["status"]
-        .fillna("Sem Status")
-        .value_counts()
-        .reset_index()
-    )
-
-    status_vc.columns = ["Status", "Qtd"]
-
-    status_vc["Pct"] = np.where(
-        status_vc["Qtd"].sum() > 0,
-        (status_vc["Qtd"] / status_vc["Qtd"].sum() * 100).round(1),
-        0
-    )
-
-    status_vc["Volume"] = status_vc["Status"].map(
-        df_join_f.groupby("status")["valor_fatura"].sum().to_dict()
-    ).fillna(0)
-
-    # ──────────────────────────────────────
-    # GRÁFICO PIZZA
-    # ──────────────────────────────────────
     with col_st1:
+        fig_pie = px.pie(df_status, values="qtd", names="status",
+                          color="status", color_discrete_map=STATUS_COLORS, hole=0.55)
+        fig_pie.update_layout(height=290, paper_bgcolor="rgba(0,0,0,0)",
+                               font=dict(color="#273a52"),
+                               legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
+        fig_pie.update_traces(textfont_size=10, textinfo="percent+label")
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-        fig_pie = px.pie(
-            status_vc,
-            values="Qtd",
-            names="Status",
-            color="Status",
-            color_discrete_map=STATUS_COLORS,
-            hole=0.55
-        )
-
-        fig_pie.update_layout(
-            height=300,
-            paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#94a3b8"),
-            legend=dict(
-                font=dict(size=10),
-                bgcolor="rgba(0,0,0,0)"
-            )
-        )
-
-        fig_pie.update_traces(
-            textfont_size=10,
-            textinfo="percent+label"
-        )
-
-        st.plotly_chart(
-            fig_pie,
-            use_container_width=True
-        )
-
-    # ──────────────────────────────────────
-    # BARRAS STATUS
-    # ──────────────────────────────────────
     with col_st2:
-
-        fig_bar_st = px.bar(
-            status_vc,
-            x="Status",
-            y="Qtd",
-            color="Status",
-            color_discrete_map=STATUS_COLORS,
-            text=status_vc["Pct"].apply(lambda x: f"{x:.1f}%")
-        )
-
-        fig_bar_st.update_layout(
-            height=300,
-            showlegend=False,
-            **LAYOUT
-        )
-
-        fig_bar_st.update_traces(
-            textposition="outside",
-            marker_line_width=0
-        )
-
+        fig_bar_st = px.bar(df_status, x="status", y="qtd", color="status",
+                             color_discrete_map=STATUS_COLORS,
+                             text=df_status["pct"].apply(lambda x: f"{x:.1f}%"))
+        fig_bar_st.update_layout(height=290, showlegend=False, **LAYOUT)
+        fig_bar_st.update_traces(textposition="outside", marker_line_width=0)
         ax(fig_bar_st)
+        st.plotly_chart(fig_bar_st, use_container_width=True)
 
-        st.plotly_chart(
-            fig_bar_st,
-            use_container_width=True
-        )
+    st.markdown('<div class="sec">Resumo por Referência</div>', unsafe_allow_html=True)
+    df_res = df_safra.copy()
+    df_res["vol_fat"]   = df_res["vol_fat"].apply(brl)
+    df_res["vol_pag"]   = df_res["vol_pag"].apply(brl)
+    df_res["n_fat"]     = df_res["n_fat"].apply(nn)
+    df_res["n_cli"]     = df_res["n_cli"].apply(nn)
+    df_res["cob_pct"]   = df_res["cob_pct"].apply(lambda x: f"{x:.1f}%")
+    df_res["taxa_inad"] = df_res["taxa_inad"].apply(lambda x: f"{x:.1f}%")
+    df_res.columns = ["Ref","Faturas","Clientes","Vol Faturado","Vol Pago","% Pago","Inad.","Taxa Inad."]
+    st.dataframe(df_res, use_container_width=True, hide_index=True)
 
-    # ═══════════════════════════════════════
-    # TABELA RESUMO
-    # ═══════════════════════════════════════
-    st.markdown(
-        '<div class="sec">Resumo por Referência</div>',
-        unsafe_allow_html=True
-    )
-
-    df_resumo = df_ev.copy()
-
-    df_resumo["vol_fat"] = df_resumo["vol_fat"].apply(brl)
-    df_resumo["vol_pag"] = df_resumo["vol_pag"].apply(brl)
-    df_resumo["n_fat"] = df_resumo["n_fat"].apply(nn)
-    df_resumo["n_cli"] = df_resumo["n_cli"].apply(nn)
-
-    df_resumo["cobertura_pct"] = df_resumo[
-        "cobertura_pct"
-    ].apply(lambda x: f"{x:.1f}%")
-
-    df_resumo.columns = [
-        "Ref",
-        "Vol Faturado",
-        "Faturas",
-        "Clientes",
-        "Vol Pago",
-        "% Pago"
-    ]
-
-    st.dataframe(
-        df_resumo,
-        use_container_width=True,
-        hide_index=True
-    )
 # ══════════════════════════════════════════════════════════════
 # ABA 2 — FATURAS
 # ══════════════════════════════════════════════════════════════
-with tab_fat:
+with tab_fat_aba:
 
-    # Corrige colunas numéricas para evitar erro no Streamlit
-    df_fat_f["valor_fatura"] = pd.to_numeric(df_fat_f["valor_fatura"], errors="coerce")
-    df_fat_f["valor_pagamento_minimo"] = pd.to_numeric(df_fat_f["valor_pagamento_minimo"], errors="coerce")
+    df_h  = get_hist_fatura(safras_key)
+    df_sc = get_scatter_fat(safras_key)
+    df_fx = get_faixas(safras_key)
+    pcts  = get_percentis_fatura(safras_key)
 
     kf1,kf2,kf3,kf4 = st.columns(4)
-    kf1.metric("Ticket Médio",   brl(df_fat_f["valor_fatura"].mean()))
-    kf2.metric("Ticket Mediana", brl(df_fat_f["valor_fatura"].median()))
-    kf3.metric("Maior Fatura",   brl(df_fat_f["valor_fatura"].max()))
-    kf4.metric("Pgto Mínimo Med.", brl(df_fat_f["valor_pagamento_minimo"].median()))
+    kf1.metric("Ticket Médio",     brl(df_h["valor_fatura"].mean()))
+    kf2.metric("Ticket Mediana",   brl(df_h["valor_fatura"].median()))
+    kf3.metric("Maior Fatura",     brl(df_h["valor_fatura"].max()))
+    kf4.metric("Pgto Mínimo Med.", brl(pcts.get("P50")))
 
     st.markdown("")
     col_f1, col_f2 = st.columns(2)
 
     with col_f1:
         st.markdown('<div class="sec">Distribuição do Valor de Fatura</div>', unsafe_allow_html=True)
-
-        fig_hf = px.histogram(
-            df_fat_f.dropna(subset=["valor_fatura"]),
-            x="valor_fatura",
-            nbins=50,
-            color_discrete_sequence=["#1d4ed8"],
-            marginal="box",
-            labels={"valor_fatura":"Valor Fatura (R$)"}
-        )
-
+        fig_hf = px.histogram(df_h, x="valor_fatura", nbins=50,
+                               color_discrete_sequence=["#0b1f56"], marginal="box",
+                               labels={"valor_fatura":"Valor Fatura (R$)"})
         fig_hf.update_layout(height=300, showlegend=False, **LAYOUT)
         fig_hf.update_traces(marker_line_width=0)
         ax(fig_hf)
@@ -643,170 +613,76 @@ with tab_fat:
 
     with col_f2:
         st.markdown('<div class="sec">Fatura vs Pagamento Mínimo</div>', unsafe_allow_html=True)
+        fig_sc = px.scatter(df_sc, x="valor_fatura", y="valor_pagamento_minimo",
+                             color_discrete_sequence=["#053877"], opacity=0.35,
+                             labels={"valor_fatura":"Fatura (R$)","valor_pagamento_minimo":"Pgto Mín (R$)"})
+        fig_sc.update_traces(marker=dict(size=3))
+        fig_sc.update_layout(height=300, **LAYOUT)
+        ax(fig_sc)
+        st.plotly_chart(fig_sc, use_container_width=True)
 
-        df_sc = df_fat_f[
-            ["valor_fatura","valor_pagamento_minimo"]
-        ].dropna()
-
-        if len(df_sc) > 0:
-            df_sc = df_sc.sample(min(1500, len(df_sc)), random_state=42)
-
-            fig_sc = px.scatter(
-                df_sc,
-                x="valor_fatura",
-                y="valor_pagamento_minimo",
-                color_discrete_sequence=["#60a5fa"],
-                opacity=0.35,
-                labels={
-                    "valor_fatura":"Fatura (R$)",
-                    "valor_pagamento_minimo":"Pgto Mínimo (R$)"
-                }
-            )
-
-            fig_sc.update_traces(marker=dict(size=3))
-            fig_sc.update_layout(height=300, **LAYOUT)
-            ax(fig_sc)
-            st.plotly_chart(fig_sc, use_container_width=True)
-
-    # Faixas de valor
     st.markdown('<div class="sec">Concentração por Faixa de Valor</div>', unsafe_allow_html=True)
-
-    # Corrige tipo numérico
-    df_fat_f["valor_fatura"] = pd.to_numeric(df_fat_f["valor_fatura"], errors="coerce")
-
-    bins = [0,5000,15000,30000,50000,float("inf")]
-    labels_fx = ["< R$5k","R$5k–15k","R$15k–30k","R$30k–50k","> R$50k"]
-
-    df_fat_f2 = df_fat_f.copy()
-
-    df_fat_f2["faixa"] = pd.cut(
-        df_fat_f2["valor_fatura"],
-        bins=bins,
-        labels=labels_fx
-    )
-
-    df_fx = (
-        df_fat_f2["faixa"]
-        .value_counts()
-        .reindex(labels_fx)
-        .fillna(0)
-        .reset_index()
-    )
-
-    df_fx.columns = ["Faixa","Qtd"]
-
-    df_fx["Pct"] = (
-        df_fx["Qtd"] / df_fx["Qtd"].sum() * 100
-    ).round(1)
+    faixas_ord = ["< R$5k","R$5k–15k","R$15k–30k","R$30k–50k","> R$50k"]
+    df_fx = df_fx.set_index("faixa").reindex(faixas_ord).fillna(0).reset_index()
+    df_fx["pct"] = (df_fx["qtd"] / df_fx["qtd"].sum() * 100).round(1)
 
     col_fx1, col_fx2 = st.columns(2)
-
     with col_fx1:
-        fig_fx = px.bar(
-            df_fx,
-            x="Faixa",
-            y="Qtd",
-            color_discrete_sequence=["#1d4ed8"],
-            text=df_fx["Pct"].apply(lambda x: f"{x}%")
-        )
-
+        fig_fx = px.bar(df_fx, x="faixa", y="qtd", color_discrete_sequence=["#2f59cb"],
+                         text=df_fx["pct"].apply(lambda x: f"{x}%"))
         fig_fx.update_layout(height=260, showlegend=False, **LAYOUT)
         fig_fx.update_traces(textposition="outside", marker_line_width=0)
         ax(fig_fx)
         st.plotly_chart(fig_fx, use_container_width=True)
 
     with col_fx2:
-        fig_fx_pie = px.pie(
-            df_fx,
-            values="Qtd",
-            names="Faixa",
-            color_discrete_sequence=px.colors.sequential.Blues_r,
-            hole=0.45
-        )
-
-        fig_fx_pie.update_layout(
-            height=260,
-            paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#4b5563"),
-            legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)")
-        )
-
+        fig_fx_pie = px.pie(df_fx, values="qtd", names="faixa",
+                             color_discrete_sequence=px.colors.sequential.Blues_r, hole=0.45)
+        fig_fx_pie.update_layout(height=260, paper_bgcolor="rgba(0,0,0,0)",
+                                  font=dict(color="#1e3b63"),
+                                  legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         fig_fx_pie.update_traces(textfont_size=9)
         st.plotly_chart(fig_fx_pie, use_container_width=True)
 
-    # Percentis
     st.markdown('<div class="sec">Percentis do Valor de Fatura</div>', unsafe_allow_html=True)
-
-    # Corrige tipo numérico para evitar erro no quantile()
-    df_fat_f["valor_fatura"] = pd.to_numeric(
-        df_fat_f["valor_fatura"],
-        errors="coerce"
-    )
-    serie_pct = df_fat_f["valor_fatura"].dropna()
-    pcts = {
-        f"P{int(q*100)}": round(serie_pct.quantile(q), 2)
-        for q in [.10, .25, .50, .75, .90, .99]
-    }
-    df_pct_tab = pd.DataFrame({
-        "Percentil": list(pcts.keys()),
-        "Valor": [brl(v) for v in pcts.values()]
-    })
-    pc1, pc2 = st.columns([1,2])
+    pc1, pc2 = st.columns([1, 2])
     with pc1:
-        st.dataframe(
-            df_pct_tab,
-            use_container_width=True,
-            hide_index=True
-        )
+        df_pct_tab = pd.DataFrame({"Percentil":list(pcts.keys()), "Valor":[brl(v) for v in pcts.values()]})
+        st.dataframe(df_pct_tab, use_container_width=True, hide_index=True)
     with pc2:
-        fig_pct = go.Figure(
-            go.Bar(
-                x=list(pcts.keys()),
-                y=list(pcts.values()),
-                marker_color=[
-                    "#1e3a5f",
-                    "#1d4ed8",
-                    "#3b82f6",
-                    "#60a5fa",
-                    "#93c5fd",
-                    "#bfdbfe"
-                ],
-                text=[brl(v) for v in pcts.values()],
-                textposition="outside",
-                textfont=dict(size=9, color="#4b5563"),
-            )
-        )
-        fig_pct.update_layout(
-            height=220,
-            showlegend=False,
-            **LAYOUT
-        )
+        fig_pct = go.Figure(go.Bar(
+            x=list(pcts.keys()), y=list(pcts.values()),
+            marker_color=["#1e3a5f","#1d4ed8","#3b82f6","#60a5fa","#252f3a","#132c49"],
+            text=[brl(v) for v in pcts.values()],
+            textposition="outside", textfont=dict(size=9),
+        ))
+        fig_pct.update_layout(height=220, showlegend=False, **LAYOUT)
         ax(fig_pct)
-        st.plotly_chart(
-            fig_pct,
-            use_container_width=True
-        )
+        st.plotly_chart(fig_pct, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════
 # ABA 3 — PAGAMENTOS
 # ══════════════════════════════════════════════════════════════
-with tab_pag:
+with tab_pag_aba:
 
-    df_pag_f["valor_pagamento"] = pd.to_numeric(df_pag_f["valor_pagamento"], errors="coerce")
+    df_hp    = get_hist_pagamento(safras_key)
+    df_aging = get_aging(safras_key)
+    df_sp    = get_por_safra(safras_key)
+    kpis_p   = get_kpis(safras_key)
 
     kp1,kp2,kp3,kp4 = st.columns(4)
-    kp1.metric("Volume Total Pago",  brl(df_pag_f["valor_pagamento"].sum()))
-    kp2.metric("Mediana Pagamento",  brl(df_pag_f["valor_pagamento"].median()))
-    kp3.metric("Registros de Pgto.", nn(len(df_pag_f)))
-    kp4.metric("Clientes Pagantes",  nn(df_pag_f["id_cliente"].nunique()))
+    kp1.metric("Volume Total Pago",  brl(kpis_p["vol_pago"]))
+    kp2.metric("Mediana Pagamento",  brl(df_hp["valor_pagamento"].median()))
+    kp3.metric("Registros de Pgto.", nn(len(df_hp)))
+    kp4.metric("Clientes Pagantes",  nn(kpis_p["n_pagantes"]))
 
     st.markdown("")
     col_p1, col_p2 = st.columns(2)
 
     with col_p1:
         st.markdown('<div class="sec">Distribuição do Valor de Pagamento</div>', unsafe_allow_html=True)
-        fig_ph = px.histogram(df_pag_f.dropna(subset=["valor_pagamento"]), x="valor_pagamento", nbins=50,
-                               color_discrete_sequence=["#4ade80"], marginal="box",
+        fig_ph = px.histogram(df_hp, x="valor_pagamento", nbins=50,
+                               color_discrete_sequence=["#170650"], marginal="box",
                                labels={"valor_pagamento":"Valor Pago (R$)"})
         fig_ph.update_layout(height=300, showlegend=False, **LAYOUT)
         fig_ph.update_traces(marker_line_width=0)
@@ -814,79 +690,62 @@ with tab_pag:
         st.plotly_chart(fig_ph, use_container_width=True)
 
     with col_p2:
-        st.markdown('<div class="sec">Volume Pago por Safra</div>', unsafe_allow_html=True)
-
-        df_pag_f["valor_pagamento"] = pd.to_numeric(df_pag_f["valor_pagamento"], errors="coerce")
-
-        df_pvol = (df_pag_f.assign(safra=df_pag_f["data_pagamento"].dt.to_period("M").astype(str))
-                   .groupby("safra").agg(vol=("valor_pagamento","sum"),n=("id_cliente","nunique")).reset_index())
-
-        fig_pvol = px.bar(df_pvol, x="safra", y="vol",
-                           color_discrete_sequence=["#4ade80"],
-                           text=[brl(v) for v in df_pvol["vol"]],
-                           labels={"vol":"Volume Pago (R$)"})
-
+        st.markdown('<div class="sec">Volume Pago por Referência</div>', unsafe_allow_html=True)
+        fig_pvol = px.bar(df_sp, x="safra", y="vol_pag",
+                           color_discrete_sequence=["#0c0587"],
+                           text=[brl(v) for v in df_sp["vol_pag"]],
+                           labels={"vol_pag":"Volume Pago (R$)"})
         fig_pvol.update_layout(height=300, showlegend=False, **LAYOUT)
         fig_pvol.update_traces(textposition="outside", marker_line_width=0)
         ax(fig_pvol)
         st.plotly_chart(fig_pvol, use_container_width=True)
 
-    # Aging
     st.markdown('<div class="sec">Aging — Dias entre Vencimento e Pagamento</div>', unsafe_allow_html=True)
-    df_aging = df_join_f[df_join_f["dias_atraso"].notna()].copy()
     col_ag1, col_ag2 = st.columns(2)
 
     with col_ag1:
         fig_ag = px.histogram(df_aging, x="dias_atraso", nbins=60,
-                               color_discrete_sequence=["#f59e0b"],
+                               color_discrete_sequence=["#1d0448"],
                                labels={"dias_atraso":"Dias (negativo = antecipado)"},
                                marginal="box")
-        fig_ag.add_vline(x=0, line_dash="dash", line_color="#f43f5e", line_width=1.5)
+        fig_ag.add_vline(x=0, line_dash="dash", line_color="#19057A", line_width=1.5)
         fig_ag.update_layout(height=300, showlegend=False, **LAYOUT)
         fig_ag.update_traces(marker_line_width=0)
         ax(fig_ag)
         st.plotly_chart(fig_ag, use_container_width=True)
 
     with col_ag2:
-        n_prazo  = (df_aging["dias_atraso"] <= 0).sum()
-        n_atraso = (df_aging["dias_atraso"] > 0).sum()
-        n_antec  = (df_aging["dias_atraso"] < 0).sum()
-        aging_df = pd.DataFrame({
-            "Status": ["No prazo / antecipado","Em atraso"],
-            "Qtd":    [int(n_prazo), int(n_atraso)],
-        })
+        n_prazo  = int((df_aging["dias_atraso"] <= 0).sum())
+        n_atraso = int((df_aging["dias_atraso"] > 0).sum())
+        aging_df = pd.DataFrame({"Status":["No prazo / antecipado","Em atraso"],"Qtd":[n_prazo,n_atraso]})
         fig_ag_pie = px.pie(aging_df, values="Qtd", names="Status",
-                             color_discrete_sequence=["#4ade80","#f43f5e"], hole=0.5)
-        fig_ag_pie.update_layout(height=300, paper_bgcolor="rgba(0,0,0,0)",
-                                  font=dict(color="#4b5563"),
-                                  legend=dict(font=dict(size=10),bgcolor="rgba(0,0,0,0)"))
+                             color_discrete_sequence=["#1026B2","#0a05a7"], hole=0.5)
+        fig_ag_pie.update_layout(height=260, paper_bgcolor="rgba(0,0,0,0)",
+                                  font=dict(color="#075cd3"),
+                                  legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         st.plotly_chart(fig_ag_pie, use_container_width=True)
-
-        ag_med = df_aging["dias_atraso"].median()
-        ag_p75 = df_aging["dias_atraso"].quantile(0.75)
-        st.metric("Mediana aging (dias)", f"{ag_med:.0f}")
-        st.metric("P75 aging (dias)",     f"{ag_p75:.0f}")
-
+        st.metric("Mediana aging (dias)", f"{df_aging['dias_atraso'].median():.0f}")
+        st.metric("P75 aging (dias)",     f"{df_aging['dias_atraso'].quantile(0.75):.0f}")
 
 # ══════════════════════════════════════════════════════════════
 # ABA 4 — INADIMPLÊNCIA
 # ══════════════════════════════════════════════════════════════
 with tab_inad:
 
-    df_join_f["valor_fatura"] = pd.to_numeric(df_join_f["valor_fatura"], errors="coerce")
-    df_join_f["valor_pagamento"] = pd.to_numeric(df_join_f["valor_pagamento"], errors="coerce")
+    df_sp_i   = get_por_safra(safras_key)
+    df_st_i   = get_status_counts(safras_key)
+    df_top    = get_top_inad(safras_key)
 
-    n_total   = len(df_join_f)
-    n_inad    = df_join_f["status"].isin(["Sem Pagamento","Pago em Atraso","Abaixo do Mínimo"]).sum()
-    pct_inad  = n_inad / n_total * 100 if n_total else 0
-    vol_inad  = df_join_f.loc[df_join_f["status"] != "Pago no Prazo", "valor_fatura"].sum()
-    cli_inad  = df_join_f.loc[df_join_f["status"] != "Pago no Prazo", "id_cliente"].nunique()
-    vol_sp    = df_join_f.loc[df_join_f["status"] == "Sem Pagamento", "valor_fatura"].sum()
+    n_total  = int(df_st_i["qtd"].sum())
+    n_inad   = int(df_st_i.loc[df_st_i["status"] != "Pago no Prazo","qtd"].sum())
+    vol_inad = float(df_st_i.loc[df_st_i["status"] != "Pago no Prazo","volume"].sum())
+    vol_sp   = float(df_st_i.loc[df_st_i["status"] == "Sem Pagamento","volume"].sum()) if "Sem Pagamento" in df_st_i["status"].values else 0
+    taxa_i   = n_inad / n_total * 100 if n_total else 0
 
     ki1,ki2,ki3,ki4 = st.columns(4)
-    ki1.metric("Taxa de Inadimplência",  f"{pct_inad:.1f}%",
+    ki1.metric("Taxa de Inadimplência",  f"{taxa_i:.1f}%",
                delta=f"{nn(n_inad)} faturas", delta_color="inverse")
-    ki2.metric("Clientes Inadimplentes", nn(cli_inad))
+    ki2.metric("Clientes em risco",      nn(len(df_top)))
     ki3.metric("Volume em Risco",        brl(vol_inad))
     ki4.metric("Volume Sem Pagamento",   brl(vol_sp))
 
@@ -894,142 +753,80 @@ with tab_inad:
     col_i1, col_i2 = st.columns(2)
 
     with col_i1:
-        st.markdown('<div class="sec">Status de Pagamento — Todas as Faturas</div>', unsafe_allow_html=True)
-        df_st = df_join_f["status"].value_counts().reset_index()
-        df_st.columns = ["Status","Qtd"]
-        df_st["Volume"] = df_st["Status"].map(df_join_f.groupby("status")["valor_fatura"].sum().to_dict())
-
-        fig_st = px.bar(df_st, x="Status", y="Qtd",
-                         color="Status", color_discrete_map=STATUS_COLORS,
-                         text=df_st["Qtd"].apply(nn))
-
-        fig_st.update_layout(height=300, showlegend=False, **LAYOUT)
+        st.markdown('<div class="sec">Status de Pagamento</div>', unsafe_allow_html=True)
+        fig_st = px.bar(df_st_i, x="status", y="qtd", color="status",
+                         color_discrete_map=STATUS_COLORS, text=df_st_i["qtd"].apply(nn))
+        fig_st.update_layout(height=290, showlegend=False, **LAYOUT)
         fig_st.update_traces(textposition="outside", marker_line_width=0)
         ax(fig_st)
         st.plotly_chart(fig_st, use_container_width=True)
 
     with col_i2:
         st.markdown('<div class="sec">Volume em Risco por Status</div>', unsafe_allow_html=True)
-
-        fig_vst = px.pie(df_st, values="Volume", names="Status",
-                          color="Status", color_discrete_map=STATUS_COLORS, hole=0.48)
-
-        fig_vst.update_layout(height=300, paper_bgcolor="rgba(0,0,0,0)",
-                               font=dict(color="#4b5563"),
-                               legend=dict(font=dict(size=10),bgcolor="rgba(0,0,0,0)"))
-
+        fig_vst = px.pie(df_st_i, values="volume", names="status",
+                          color="status", color_discrete_map=STATUS_COLORS, hole=0.48)
+        fig_vst.update_layout(height=290, paper_bgcolor="rgba(0,0,0,0)",
+                               font=dict(color="#2c74d9"),
+                               legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         st.plotly_chart(fig_vst, use_container_width=True)
 
-    # Evolução por safra
-    st.markdown('<div class="sec">Evolução da Inadimplência por Safra</div>', unsafe_allow_html=True)
-
-    df_inad_safra = (
-        df_join_f.groupby("safra")
-        .apply(lambda g: pd.Series({
-            "total": len(g),
-            "inadimplentes": (g["status"] != "Pago no Prazo").sum(),
-            "vol_risco": g.loc[g["status"] != "Pago no Prazo","valor_fatura"].sum(),
-        }))
-        .reset_index()
-    )
-
-    df_inad_safra["taxa"] = (
-        df_inad_safra["inadimplentes"] /
-        df_inad_safra["total"] * 100
-    ).round(1)
-
+    st.markdown('<div class="sec">Evolução da Inadimplência por Referência</div>', unsafe_allow_html=True)
     col_is1, col_is2 = st.columns(2)
 
     with col_is1:
         fig_is = go.Figure()
-
-        fig_is.add_trace(go.Bar(
-            x=df_inad_safra["safra"],
-            y=df_inad_safra["total"],
-            name="Total Faturas",
-            marker_color="#172554"
-        ))
-
-        fig_is.add_trace(go.Bar(
-            x=df_inad_safra["safra"],
-            y=df_inad_safra["inadimplentes"],
-            name="Inadimplentes",
-            marker_color="#f43f5e"
-        ))
-
-        fig_is.update_layout(height=260, barmode="overlay",
-                              legend=dict(font=dict(size=10),bgcolor="rgba(0,0,0,0)"),
-                              **LAYOUT)
-
+        fig_is.add_trace(go.Bar(x=df_sp_i["safra"], y=df_sp_i["n_fat"],
+                                 name="Total Faturas", marker_color="#172554"))
+        fig_is.add_trace(go.Bar(x=df_sp_i["safra"], y=df_sp_i["inadimplentes"],
+                                 name="Inadimplentes", marker_color="#4A0319"))
+        fig_is.update_layout(height=250, barmode="overlay",
+                              legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"), **LAYOUT)
         ax(fig_is)
         st.plotly_chart(fig_is, use_container_width=True)
 
     with col_is2:
-
-        max_taxa = df_inad_safra["taxa"].max() if len(df_inad_safra) else 0
-
+        max_t = float(df_sp_i["taxa_inad"].max()) if len(df_sp_i) else 10
         fig_taxa = go.Figure(go.Scatter(
-            x=df_inad_safra["safra"],
-            y=df_inad_safra["taxa"],
+            x=df_sp_i["safra"], y=df_sp_i["taxa_inad"],
             mode="lines+markers+text",
-            text=[f"{v}%" for v in df_inad_safra["taxa"]],
-            textposition="top center",
-            textfont=dict(size=10,color="#f43f5e"),
-            line=dict(color="#f43f5e",width=2.5),
-            marker=dict(size=9,color="#f43f5e"),
-            fill="tozeroy",
-            fillcolor="rgba(244,63,94,0.07)",
+            text=[f"{v}%" for v in df_sp_i["taxa_inad"]],
+            textposition="top center", textfont=dict(size=10, color="#a80923"),
+            line=dict(color="#6c0516", width=2.5), marker=dict(size=9, color="#5e0413"),
+            fill="tozeroy", fillcolor="rgba(244,63,94,0.07)",
         ))
-
-        fig_taxa.update_layout(
-            height=260,
-            yaxis=dict(ticksuffix="%", range=[0, max_taxa*1.3+5]),
-            **LAYOUT
-        )
-
+        fig_taxa.update_layout(height=250,
+                                yaxis=dict(ticksuffix="%", range=[0, max_t*1.3+5]), **LAYOUT)
         ax(fig_taxa)
         st.plotly_chart(fig_taxa, use_container_width=True)
 
-    # Top inadimplentes
-    st.markdown('<div class="sec">Top 20 Clientes · Maior Volume em Risco</div>', unsafe_allow_html=True)
+    # Top inadimplentes — clicável → navega para perfil do cliente
+    st.markdown('<div class="sec">Top 20 · Maior Volume em Risco · <span style="color:#60a5fa;font-weight:400;font-size:0.8rem;">clique na linha para ver o perfil</span></div>', unsafe_allow_html=True)
 
-    df_top = (
-        df_join_f[df_join_f["status"] != "Pago no Prazo"]
-        .groupby("id_cliente")
-        .agg(
-            Faturas=("id_fatura","count"),
-            Volume_Risco=("valor_fatura","sum"),
-            Status=("status", lambda x: x.mode().iloc[0] if not x.mode().empty else "")
-        )
-        .sort_values("Volume_Risco", ascending=False)
-        .head(20)
-        .reset_index()
+    df_top_fmt = df_top.copy()
+    df_top_fmt["vol_risco"] = df_top_fmt["vol_risco"].apply(brl)
+    df_top_fmt.columns = ["ID Cliente","Faturas Inad.","Volume em Risco","Status Principal"]
+
+    ev_inad = st.dataframe(
+        df_top_fmt,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
     )
 
-    df_top["Volume_Risco"] = df_top["Volume_Risco"].apply(brl)
-    df_top.columns = ["ID Cliente","Faturas Inad.","Volume em Risco","Status Principal"]
-
-    st.dataframe(df_top, use_container_width=True, hide_index=True)
+    if ev_inad.selection.rows:
+        idx = ev_inad.selection.rows[0]
+        cli_clicado = int(df_top.iloc[idx]["id_cliente"])
+        st.session_state["cliente_selecionado"] = cli_clicado
+        st.success(f"✅ Cliente **#{cli_clicado}** selecionado. Acesse **🔍 Perfil do Cliente** para o histórico completo.")
 
     # Download
-    df_exp = df_join_f[
-        ["id_fatura","id_cliente","safra","data_vencimento",
-         "data_pagamento","valor_fatura","valor_pagamento",
-         "dias_atraso","status"]
-    ].copy()
-
-    df_exp["data_vencimento"] = df_exp["data_vencimento"].dt.strftime("%Y-%m-%d")
-    df_exp["data_pagamento"] = df_exp["data_pagamento"].dt.strftime("%Y-%m-%d")
-
+    df_exp = get_aging(safras_key).copy()
     buf_inad = io.BytesIO()
     df_exp.to_excel(buf_inad, index=False, engine="openpyxl")
-
-    st.download_button(
-        "⬇️ Exportar análise completa de inadimplência",
-        buf_inad.getvalue(),
-        "inadimplencia_trusted.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    st.download_button("⬇️ Exportar análise de inadimplência",
+                       buf_inad.getvalue(), "inadimplencia_trusted.xlsx",
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ══════════════════════════════════════════════════════════════
 # ABA 5 — QUALIDADE DE DADOS
@@ -1040,7 +837,7 @@ with tab_quality:
     <div class='info-box'>
       <div class='title'>🔬 Garantias da Camada Trusted</div>
       <div class='body'>
-        <b style='color:#6b7280'>Tipagem:</b> datas em DATE, valores em DOUBLE, IDs em BIGINT &nbsp;·&nbsp;
+        <b style='color:#6b7280'>Tipagem:</b> datas em DATE · valores em DOUBLE · IDs em BIGINT &nbsp;·&nbsp;
         <b style='color:#6b7280'>Deduplicação:</b> por (id_fatura, id_cliente) &nbsp;·&nbsp;
         <b style='color:#6b7280'>Particionamento:</b> ref = YYYYMM &nbsp;·&nbsp;
         <b style='color:#6b7280'>Engine:</b> PySpark → Parquet (snappy) &nbsp;·&nbsp;
@@ -1049,302 +846,203 @@ with tab_quality:
     </div>
     """, unsafe_allow_html=True)
 
-    col_q1, col_q2 = st.columns(2)
+    df_nf, df_np = get_nulls(safras_key)
+    for df_n in [df_nf, df_np]:
+        df_n["% Nulo"] = (df_n["nulos"] / df_n["total"] * 100).round(2)
+        df_n["Status"] = df_n["% Nulo"].apply(
+            lambda x: "✅ OK" if x == 0 else ("⚠️ Atenção" if x < 5 else "❌ Crítico")
+        )
 
+    col_q1, col_q2 = st.columns(2)
     with col_q1:
         st.markdown('<div class="sec">Diagnóstico de Nulos · tb_faturas</div>', unsafe_allow_html=True)
-
-        cols_fat = [
-            c for c in [
-                "id_fatura","id_cliente","data_emissao","data_vencimento",
-                "valor_fatura","valor_pagamento_minimo"
-            ] if c in df_fat.columns
-        ]
-
-        null_fat = {c: int(df_fat[c].isna().sum()) for c in cols_fat}
-
-        df_nf = pd.DataFrame({
-            "Coluna": cols_fat,
-            "Nulos": [null_fat[c] for c in cols_fat],
-            "Total": [len(df_fat)] * len(cols_fat),
-        })
-
-        df_nf["% Nulo"] = (df_nf["Nulos"] / df_nf["Total"] * 100).round(2)
-
-        df_nf["Status"] = df_nf["% Nulo"].apply(
-            lambda x: "✅ OK" if x == 0 else ("⚠️ Atenção" if x < 5 else "❌ Crítico")
-        )
-
-        st.dataframe(df_nf, use_container_width=True, hide_index=True)
-
+        st.dataframe(df_nf.rename(columns={"col":"Coluna","nulos":"Nulos","total":"Total"}),
+                     use_container_width=True, hide_index=True)
     with col_q2:
         st.markdown('<div class="sec">Diagnóstico de Nulos · tb_pagamentos</div>', unsafe_allow_html=True)
+        st.dataframe(df_np.rename(columns={"col":"Coluna","nulos":"Nulos","total":"Total"}),
+                     use_container_width=True, hide_index=True)
 
-        cols_pag = [
-            c for c in [
-                "id_pagamento","id_fatura","id_cliente",
-                "data_pagamento","valor_pagamento"
-            ] if c in df_pag.columns
-        ]
-
-        null_pag = {c: int(df_pag[c].isna().sum()) for c in cols_pag}
-
-        df_np = pd.DataFrame({
-            "Coluna": cols_pag,
-            "Nulos": [null_pag[c] for c in cols_pag],
-            "Total": [len(df_pag)] * len(cols_pag),
-        })
-
-        df_np["% Nulo"] = (df_np["Nulos"] / df_np["Total"] * 100).round(2)
-
-        df_np["Status"] = df_np["% Nulo"].apply(
-            lambda x: "✅ OK" if x == 0 else ("⚠️ Atenção" if x < 5 else "❌ Crítico")
-        )
-
-        st.dataframe(df_np, use_container_width=True, hide_index=True)
-
-        # Duplicatas
     st.markdown('<div class="sec">Verificação de Duplicatas</div>', unsafe_allow_html=True)
+    dup_fat, dup_pag = get_duplicatas(safras_key)
     dc1, dc2 = st.columns(2)
-    dup_fat = int(df_fat.duplicated(subset=["id_fatura","id_cliente"]).sum())
-    dup_pag = int(
-        df_pag.duplicated(
-            subset=["id_pagamento","id_cliente"] if "id_pagamento" in df_pag.columns
-            else ["id_fatura","id_cliente"]
-        ).sum()
-    )
-    dc1.metric("Duplicatas · tb_faturas",   "✅ Nenhuma" if dup_fat == 0 else f"⚠️ {dup_fat}",
-               delta=f"{len(df_fat):,} registros únicos")
-    dc2.metric("Duplicatas · tb_pagamentos","✅ Nenhuma" if dup_pag == 0 else f"⚠️ {dup_pag}",
-               delta=f"{len(df_pag):,} registros únicos")
-    # Integridade referencial
-    st.markdown('<div class="sec">Integridade Referencial · Faturas sem Pagamento por Safra</div>', unsafe_allow_html=True)
-    df_ref = (
-        df_join_f.groupby("safra")
-        .apply(lambda g: pd.Series({
-            "total_fat":    len(g),
-            "sem_pagamento":(g["data_pagamento"].isna()).sum(),
-        }))
-        .reset_index()
-    )
-    df_ref["pct_sem_pag"] = (df_ref["sem_pagamento"] / df_ref["total_fat"] * 100).round(1)
-    fig_ref = go.Figure()
-    fig_ref.add_trace(go.Bar(x=df_ref["safra"], y=df_ref["total_fat"],
-                              name="Total Faturas", marker_color="#131A30"))
-    fig_ref.add_trace(go.Bar(x=df_ref["safra"], y=df_ref["sem_pagamento"],
-                              name="Sem Pagamento", marker_color="#1e233d"))
-    fig_ref.add_trace(go.Scatter(x=df_ref["safra"], y=df_ref["pct_sem_pag"],
-                                  name="% Sem Pagamento", yaxis="y2",
-                                  line=dict(color="#593959",width=2), mode="lines+markers"))
-    fig_ref.update_layout(
-        height=290, barmode="overlay",
-        yaxis2=dict(overlaying="y", side="right", showgrid=False,
-                    ticksuffix="%", tickfont=dict(color="#131331",size=10), range=[0,130]),
-        legend=dict(font=dict(size=10),bgcolor="rgba(0,0,0,0)"), **LAYOUT,
-    )
-    ax(fig_ref)
-    st.plotly_chart(fig_ref, use_container_width=True)
+    dc1.metric("Duplicatas · tb_faturas",    "✅ Nenhuma" if dup_fat == 0 else f"⚠️ {dup_fat}")
+    dc2.metric("Duplicatas · tb_pagamentos", "✅ Nenhuma" if dup_pag == 0 else f"⚠️ {dup_pag}")
 
-    # Integridade referencial
-    st.markdown('<div class="sec">Integridade Referencial · Faturas sem Pagamento por Safra</div>', unsafe_allow_html=True)
-    df_ref = (
-        df_join_f.groupby("safra")
-        .apply(lambda g: pd.Series({
-            "total_fat":    len(g),
-            "sem_pagamento":(g["data_pagamento"].isna()).sum(),
-        }))
-        .reset_index()
-    )
-    df_ref["pct_sem_pag"] = (df_ref["sem_pagamento"] / df_ref["total_fat"] * 100).round(1)
+    st.markdown('<div class="sec">Integridade Referencial · Faturas sem Pagamento</div>', unsafe_allow_html=True)
+    df_ref = get_ref_integridade(safras_key)
     fig_ref = go.Figure()
     fig_ref.add_trace(go.Bar(x=df_ref["safra"], y=df_ref["total_fat"],
                               name="Total Faturas", marker_color="#172554"))
-    fig_ref.add_trace(go.Bar(x=df_ref["safra"], y=df_ref["sem_pagamento"],
-                              name="Sem Pagamento", marker_color="#460845"))
+    fig_ref.add_trace(go.Bar(x=df_ref["safra"], y=df_ref["sem_pag"],
+                              name="Sem Pagamento", marker_color="#4d030f"))
     fig_ref.add_trace(go.Scatter(x=df_ref["safra"], y=df_ref["pct_sem_pag"],
-                                  name="% Sem Pagamento", yaxis="y2",
-                                  line=dict(color="#312d48",width=2), mode="lines+markers"))
+                                  name="% Sem Pag.", yaxis="y2",
+                                  line=dict(color="#22045f", width=2), mode="lines+markers"))
     fig_ref.update_layout(
-        height=290, barmode="overlay",
+        height=280, barmode="overlay",
         yaxis2=dict(overlaying="y", side="right", showgrid=False,
-                    ticksuffix="%", tickfont=dict(color="#1c0a75",size=10), range=[0,130]),
-        legend=dict(font=dict(size=10),bgcolor="rgba(0,0,0,0)"), **LAYOUT,
+                    ticksuffix="%", tickfont=dict(color="#140442", size=10), range=[0, 130]),
+        legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"), **LAYOUT,
     )
     ax(fig_ref)
     st.plotly_chart(fig_ref, use_container_width=True)
 
-    # Estatísticas das colunas
-    st.markdown('<div class="sec">Estatísticas Descritivas · Colunas Numéricas</div>', unsafe_allow_html=True)
-
-    df_fat["valor_fatura"] = pd.to_numeric(df_fat["valor_fatura"], errors="coerce")
-    df_fat["valor_pagamento_minimo"] = pd.to_numeric(df_fat["valor_pagamento_minimo"], errors="coerce")
-    df_pag["valor_pagamento"] = pd.to_numeric(df_pag["valor_pagamento"], errors="coerce")
-
-    df_desc = pd.DataFrame({
-        "Coluna": ["valor_fatura","valor_pagamento_minimo","valor_pagamento"],
-        "Mínimo": [brl(df_fat["valor_fatura"].min()),
-                   brl(df_fat["valor_pagamento_minimo"].min()),
-                   brl(df_pag["valor_pagamento"].min())],
-        "Mediana": [brl(df_fat["valor_fatura"].median()),
-                    brl(df_fat["valor_pagamento_minimo"].median()),
-                    brl(df_pag["valor_pagamento"].median())],
-        "Média":   [brl(df_fat["valor_fatura"].mean()),
-                    brl(df_fat["valor_pagamento_minimo"].mean()),
-                    brl(df_pag["valor_pagamento"].mean())],
-        "Máximo":  [brl(df_fat["valor_fatura"].max()),
-                    brl(df_fat["valor_pagamento_minimo"].max()),
-                    brl(df_pag["valor_pagamento"].max())],
-        "Desvio Padrão": [brl(df_fat["valor_fatura"].std()),
-                          brl(df_fat["valor_pagamento_minimo"].std()),
-                          brl(df_pag["valor_pagamento"].std())],
-    })
-
-    st.dataframe(df_desc, use_container_width=True, hide_index=True)
-
-    # Inventário de arquivos da camada
-    st.markdown('<div class="sec">Inventário de Arquivos · Camada Trusted</div>', unsafe_allow_html=True)
-
+    st.markdown('<div class="sec">Inventário · Camada Trusted</div>', unsafe_allow_html=True)
     inv = pd.DataFrame([
-        {"Tabela":"tb_faturas",    "Safra":",".join(sorted(df_fat["safra"].astype(str).unique())),
-         "Arquivos":"2 (part-00000, part-00001)",
-         "Registros":nn(len(df_fat)),"Partição":"ref","Formato":"Parquet (snappy)"},
-
-        {"Tabela":"tb_pagamentos", "Safra":",".join(sorted(df_pag["safra"].astype(str).unique())),
-         "Arquivos":"1 (part-00000)",
-         "Registros":nn(len(df_pag)),"Partição":"ref","Formato":"Parquet (snappy)"},
+        {"Tabela":"tb_faturas",    "Safras":", ".join(safras_sel), "Formato":"Parquet (snappy)","Partição":"ref","Engine":"DuckDB"},
+        {"Tabela":"tb_pagamentos", "Safras":", ".join(safras_sel), "Formato":"Parquet (snappy)","Partição":"ref","Engine":"DuckDB"},
     ])
-
     st.dataframe(inv, use_container_width=True, hide_index=True)
-
 
 # ══════════════════════════════════════════════════════════════
 # ABA 6 — PERFIL DO CLIENTE
+# Query SQL parametrizada — resposta em <10ms via DuckDB
 # ══════════════════════════════════════════════════════════════
 with tab_cliente:
 
     st.markdown('<div class="sec">Consulta Individual por Cliente</div>', unsafe_allow_html=True)
 
-    df_fat["id_cliente"] = pd.to_numeric(df_fat["id_cliente"], errors="coerce")
-    df_pag["id_cliente"] = pd.to_numeric(df_pag["id_cliente"], errors="coerce")
-    df_join_f["id_cliente"] = pd.to_numeric(df_join_f["id_cliente"], errors="coerce")
+    lista_clientes = get_lista_clientes()
 
-    col_ec1, col_ec2 = st.columns([1,2])
+    if "cliente_selecionado" not in st.session_state:
+        st.session_state["cliente_selecionado"] = lista_clientes[0] if lista_clientes else 1
 
-    with col_ec1:
-        id_cli = st.number_input("ID do Cliente",
-                                  min_value=int(df_fat["id_cliente"].min()),
-                                  max_value=int(df_fat["id_cliente"].max()),
-                                  value=int(df_fat["id_cliente"].iloc[0]),
-                                  step=1)
+    # Garante que o valor do session_state é válido
+    if st.session_state["cliente_selecionado"] not in lista_clientes:
+        st.session_state["cliente_selecionado"] = lista_clientes[0]
 
-        if st.button("🎲 Cliente Aleatório", use_container_width=True):
-            id_cli = int(df_fat["id_cliente"].dropna().sample(1, random_state=None).iloc[0])
+    col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([2, 1, 1])
+
+    with col_ctrl1:
+        id_cli = st.selectbox(
+            "Selecione o cliente",
+            options=lista_clientes,
+            index=lista_clientes.index(st.session_state["cliente_selecionado"]),
+            format_func=lambda x: f"Cliente #{x}",
+        )
+        st.session_state["cliente_selecionado"] = id_cli
+
+    with col_ctrl2:
+        id_manual = st.number_input(
+            "ou digite o ID",
+            min_value=int(min(lista_clientes)),
+            max_value=int(max(lista_clientes)),
+            value=int(id_cli),
+            step=1,
+        )
+        if id_manual in lista_clientes and id_manual != id_cli:
+            st.session_state["cliente_selecionado"] = id_manual
             st.rerun()
 
-    df_cli_fat = df_fat[df_fat["id_cliente"] == id_cli].sort_values("data_emissao")
-    df_cli_pag = df_pag[df_pag["id_cliente"] == id_cli].sort_values("data_pagamento")
-    df_cli_join= df_join_f[df_join_f["id_cliente"] == id_cli]
+    with col_ctrl3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🎲 Aleatório", use_container_width=True):
+            st.session_state["cliente_selecionado"] = random.choice(lista_clientes)
+            st.rerun()
+
+    id_cli = st.session_state["cliente_selecionado"]
+
+    # Queries parametrizadas — DuckDB resolve em milissegundos
+    df_cli_fat    = get_cliente_fat(id_cli)
+    df_cli_pag    = get_cliente_pag(id_cli)
+    df_cli_status = get_cliente_status(id_cli)
 
     if df_cli_fat.empty:
         st.warning(f"Cliente {id_cli} não encontrado.")
     else:
-        with col_ec2:
-            status_cli = df_cli_join["status"].mode()[0] if not df_cli_join.empty and not df_cli_join["status"].mode().empty else "—"
-            cor_status = STATUS_COLORS.get(status_cli,"#6b7280")
-
-            st.markdown(f"""
-            <div style='background:#0c1222;border:1px solid #141e38;border-radius:8px;
-                        padding:12px 18px;display:flex;gap:2rem;align-items:center;'>
-              <div>
-                <div style='color:#374151;font-size:0.68rem;text-transform:uppercase;letter-spacing:.1em;'>Cliente</div>
-                <div style='font-family:IBM Plex Mono,monospace;color:#e2e8f0;font-size:1.2rem;'>#{id_cli}</div>
-              </div>
-              <div>
-                <div style='color:#374151;font-size:0.68rem;text-transform:uppercase;letter-spacing:.1em;'>Status</div>
-                <div style='color:{cor_status};font-weight:600;font-size:0.85rem;'>{status_cli}</div>
-              </div>
-              <div>
-                <div style='color:#374151;font-size:0.68rem;text-transform:uppercase;letter-spacing:.1em;'>Faturas</div>
-                <div style='font-family:IBM Plex Mono,monospace;color:#e2e8f0;'>{len(df_cli_fat)}</div>
-              </div>
-              <div>
-                <div style='color:#374151;font-size:0.68rem;text-transform:uppercase;letter-spacing:.1em;'>Pagamentos</div>
-                <div style='font-family:IBM Plex Mono,monospace;color:#e2e8f0;'>{len(df_cli_pag)}</div>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("")
-        ck1,ck2,ck3,ck4 = st.columns(4)
-        df_cli_fat["valor_fatura"] = pd.to_numeric(df_cli_fat["valor_fatura"], errors="coerce")
-        df_cli_fat["valor_pagamento_minimo"] = pd.to_numeric(df_cli_fat["valor_pagamento_minimo"], errors="coerce")
-        df_cli_pag["valor_pagamento"] = pd.to_numeric(df_cli_pag["valor_pagamento"], errors="coerce")
-
-        vol_fat_cli = df_cli_fat["valor_fatura"].sum()
-        vol_pag_cli = df_cli_pag["valor_pagamento"].sum() if not df_cli_pag.empty else 0
+        status_cli  = df_cli_status.loc[df_cli_status["qtd"].idxmax(), "status"] if not df_cli_status.empty else "—"
+        cor_status  = STATUS_COLORS.get(status_cli, "#6b7280")
+        vol_fat_cli = float(df_cli_fat["valor_fatura"].sum())
+        vol_pag_cli = float(df_cli_pag["valor_pagamento"].sum()) if not df_cli_pag.empty else 0.0
         saldo_cli   = vol_fat_cli - vol_pag_cli
+        pct_pago    = (vol_pag_cli / vol_fat_cli * 100) if vol_fat_cli else 0
 
+        st.markdown(f"""
+        <div style='background:#0c1222;border:1px solid #141e38;border-radius:10px;
+                    padding:14px 20px;display:flex;gap:2.5rem;align-items:center;margin-bottom:1rem;'>
+          <div>
+            <div style='color:#374151;font-size:0.65rem;text-transform:uppercase;letter-spacing:.12em;'>Cliente</div>
+            <div style='font-family:IBM Plex Mono,monospace;color:#e2e8f0;font-size:1.3rem;font-weight:600;'>#{id_cli}</div>
+          </div>
+          <div>
+            <div style='color:#374151;font-size:0.65rem;text-transform:uppercase;letter-spacing:.12em;'>Status Principal</div>
+            <div style='color:{cor_status};font-weight:600;font-size:0.9rem;'>{status_cli}</div>
+          </div>
+          <div>
+            <div style='color:#374151;font-size:0.65rem;text-transform:uppercase;letter-spacing:.12em;'>Faturas</div>
+            <div style='font-family:IBM Plex Mono,monospace;color:#e2e8f0;font-size:1rem;'>{len(df_cli_fat)}</div>
+          </div>
+          <div>
+            <div style='color:#374151;font-size:0.65rem;text-transform:uppercase;letter-spacing:.12em;'>Pagamentos</div>
+            <div style='font-family:IBM Plex Mono,monospace;color:#e2e8f0;font-size:1rem;'>{len(df_cli_pag)}</div>
+          </div>
+          <div>
+            <div style='color:#374151;font-size:0.65rem;text-transform:uppercase;letter-spacing:.12em;'>% Pago</div>
+            <div style='font-family:IBM Plex Mono,monospace;color:#e2e8f0;font-size:1rem;'>{pct_pago:.1f}%</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        ck1, ck2, ck3, ck4 = st.columns(4)
         ck1.metric("Volume Faturado", brl(vol_fat_cli))
         ck2.metric("Volume Pago",     brl(vol_pag_cli))
-        ck3.metric("Saldo em Aberto", brl(saldo_cli), delta_color="inverse",
-                   delta="em risco" if saldo_cli > 0 else "quitado")
+        ck3.metric("Saldo em Aberto", brl(saldo_cli),
+                   delta="em risco" if saldo_cli > 0 else "quitado", delta_color="inverse")
+        ck4.metric("% Pago",          f"{pct_pago:.1f}%")
 
-        pct_pago_cli = (vol_pag_cli/vol_fat_cli*100) if vol_fat_cli else 0
-        ck4.metric("% Pago",          f"{pct_pago_cli:.1f}%")
         col_cl1, col_cl2 = st.columns(2)
+
         with col_cl1:
-            st.markdown("**Faturas**")
-            df_cf_fmt = df_cli_fat[["safra","data_emissao","data_vencimento",
-                                     "valor_fatura","valor_pagamento_minimo"]].copy()
-            df_cf_fmt["valor_fatura"] = df_cf_fmt["valor_fatura"].apply(brl)
-            df_cf_fmt["valor_pagamento_minimo"] = df_cf_fmt["valor_pagamento_minimo"].apply(brl)
+            st.markdown("**Histórico de Faturas**")
+            df_cf_fmt = df_cli_fat.copy()
+            df_cf_fmt["valor_fatura"]           = df_cf_fmt["valor_fatura"].apply(brl)
+            df_cf_fmt["valor_pagamento_minimo"]  = df_cf_fmt["valor_pagamento_minimo"].apply(brl)
             df_cf_fmt.columns = ["Safra","Emissão","Vencimento","Fatura","Pgto Mínimo"]
             st.dataframe(df_cf_fmt, use_container_width=True, hide_index=True)
 
         with col_cl2:
-            st.markdown("**Pagamentos**")
+            st.markdown("**Histórico de Pagamentos**")
             if df_cli_pag.empty:
                 st.info("Nenhum pagamento registrado.")
             else:
-                df_cli_pag["valor_pagamento"] = pd.to_numeric(
-                    df_cli_pag["valor_pagamento"], errors="coerce"
-                )
                 df_cp_fmt = df_cli_pag[["data_pagamento","valor_pagamento"]].copy()
                 df_cp_fmt["valor_pagamento"] = df_cp_fmt["valor_pagamento"].apply(brl)
-                df_cp_fmt.columns = ["Data Pagamento","Valor Pago"]
-
+                df_cp_fmt.columns = ["Data","Valor Pago"]
                 st.dataframe(df_cp_fmt, use_container_width=True, hide_index=True)
 
-        # Gráfico timeline
-        if not df_cli_fat.empty:
+        # Gráficos do cliente
+        col_g1, col_g2 = st.columns(2)
+
+        with col_g1:
+            if not df_cli_status.empty:
+                st.markdown("**Status das Faturas**")
+                fig_cs = px.pie(df_cli_status, values="qtd", names="status",
+                                 color="status", color_discrete_map=STATUS_COLORS, hole=0.5)
+                fig_cs.update_layout(height=240, paper_bgcolor="rgba(0,0,0,0)",
+                                      font=dict(color="#12233a"),
+                                      legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                                      margin=dict(l=10, r=10, t=10, b=10))
+                st.plotly_chart(fig_cs, use_container_width=True)
+
+        with col_g2:
+            st.markdown("**Fatura vs Pagamento por Safra**")
             fig_tl = go.Figure()
-            df_cli_fat["valor_fatura"] = pd.to_numeric(df_cli_fat["valor_fatura"], errors="coerce")
-
-            fig_tl.add_trace(go.Bar(
-                x=df_cli_fat["safra"], y=df_cli_fat["valor_fatura"],
-                name="Fatura", marker_color="#061b54",
-                text=[brl(v) for v in df_cli_fat["valor_fatura"]],
-                textposition="outside", textfont=dict(size=9,color="#4b5563"),
-            ))
-
+            df_fat_g = df_cli_fat.groupby("safra")["valor_fatura"].sum().reset_index()
+            fig_tl.add_trace(go.Bar(x=df_fat_g["safra"], y=df_fat_g["valor_fatura"],
+                                     name="Fatura", marker_color="#052d5f",
+                                     text=[brl(v) for v in df_fat_g["valor_fatura"]],
+                                     textposition="outside", textfont=dict(size=9)))
             if not df_cli_pag.empty:
-                df_cli_pag["valor_pagamento"] = pd.to_numeric(df_cli_pag["valor_pagamento"], errors="coerce")
-
-                df_cp_safra = (df_cli_pag
-                               .assign(safra=df_cli_pag["data_pagamento"].dt.to_period("M").astype(str))
-                               .groupby("safra")["valor_pagamento"].sum().reset_index())
-
-                fig_tl.add_trace(go.Bar(
-                    x=df_cp_safra["safra"], y=df_cp_safra["valor_pagamento"],
-                    name="Pago", marker_color="#312343",
-                    text=[brl(v) for v in df_cp_safra["valor_pagamento"]],
-                    textposition="outside", textfont=dict(size=9,color="#4b5563"),
-                ))
-
-            fig_tl.update_layout(height=260, barmode="group",
-                                  title_text=f"Fatura vs Pagamento — Cliente #{id_cli}",
-                                  title_font=dict(size=12,color="#6b7280"),
-                                  legend=dict(font=dict(size=10),bgcolor="rgba(0,0,0,0)"),
+                df_pag_g = (df_cli_pag
+                            .assign(safra=df_cli_pag["data_pagamento"].astype(str).str[:7])
+                            .groupby("safra")["valor_pagamento"].sum().reset_index())
+                fig_tl.add_trace(go.Bar(x=df_pag_g["safra"], y=df_pag_g["valor_pagamento"],
+                                         name="Pago", marker_color="#040780",
+                                         text=[brl(v) for v in df_pag_g["valor_pagamento"]],
+                                         textposition="outside", textfont=dict(size=9)))
+            fig_tl.update_layout(height=240, barmode="group",
+                                  legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
                                   **LAYOUT)
             ax(fig_tl)
             st.plotly_chart(fig_tl, use_container_width=True)
