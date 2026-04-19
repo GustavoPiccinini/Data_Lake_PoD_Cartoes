@@ -134,10 +134,10 @@ def ax(fig):
     return fig
 
 STATUS_COLORS = {
-    "Pago no Prazo":    "#111735",
-    "Pago em Atraso":   "#39060a",
-    "Abaixo do Mínimo": "#350421",
-    "Sem Pagamento":    "#620413",
+    "Pago no Prazo":    "#0C1EE9",
+    "Pago em Atraso":   "#14026b",
+    "Abaixo do Mínimo": "#6B0303",
+    "Sem Pagamento":    "#450101",
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -490,17 +490,17 @@ st.markdown("---")
 # ABAS
 # ══════════════════════════════════════════════════════════════
 tab_exec, tab_fat_aba, tab_pag_aba, tab_inad, tab_quality, tab_cliente = st.tabs([
-    "| Visão Geral |",
-    "| Faturas |",
-    "| Pagamentos |",
-    "| Inadimplência |",
-    "| Qualidade |",
-    "| Perfil do Cliente |",
+    "|   Visão Geral   |",
+    "|   Faturas   |",
+    "|   Pagamentos   |",
+    "|   Inadimplência   |",
+    "|   Qualidade   |",
+    "|   Perfil do Cliente   |",
 ]) 
 
 # ══════════════════════════════════════════════════════════════
 # ABA 1 — VISÃO GERAL
-# ══════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════
 with tab_exec:
 
     kpis      = get_kpis(safras_key)
@@ -524,11 +524,11 @@ with tab_exec:
     with col_ev1:
         fig_vol = go.Figure()
         fig_vol.add_trace(go.Bar(x=df_safra["safra"], y=df_safra["vol_fat"], name="Faturado",
-                                  marker_color="#365b88",
+                                  marker_color="#0d5fc4",
                                   text=[brl(v) for v in df_safra["vol_fat"]],
                                   textposition="outside", textfont=dict(size=9)))
         fig_vol.add_trace(go.Bar(x=df_safra["safra"], y=df_safra["vol_pag"], name="Pago",
-                                  marker_color="#2d1f3c",
+                                  marker_color="#7265D3",
                                   text=[brl(v) for v in df_safra["vol_pag"]],
                                   textposition="outside", textfont=dict(size=9)))
         fig_vol.update_layout(height=300, barmode="group",
@@ -539,10 +539,10 @@ with tab_exec:
     with col_ev2:
         fig_cob = go.Figure()
         fig_cob.add_trace(go.Bar(x=df_safra["safra"], y=df_safra["cob_pct"],
-                                  marker_color="#7c3aed",
+                                  marker_color="#2a08ed",
                                   text=[f"{v}%" for v in df_safra["cob_pct"]],
                                   textposition="outside", textfont=dict(size=9)))
-        fig_cob.add_hline(y=100, line_dash="dash", line_color="#213048", line_width=1)
+        fig_cob.add_hline(y=100, line_dash="dash", line_color="#032254", line_width=1)
         fig_cob.update_layout(height=300, yaxis_range=[0, 120], showlegend=False,
                                title_text="% Volume Pago / Faturado",
                                title_font=dict(size=12, color="#141d2a"), **LAYOUT)
@@ -557,7 +557,7 @@ with tab_exec:
         fig_pie = px.pie(df_status, values="qtd", names="status",
                           color="status", color_discrete_map=STATUS_COLORS, hole=0.55)
         fig_pie.update_layout(height=290, paper_bgcolor="rgba(0,0,0,0)",
-                               font=dict(color="#273a52"),
+                               font=dict(color="#c5ccd4"),
                                legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         fig_pie.update_traces(textfont_size=10, textinfo="percent+label")
         st.plotly_chart(fig_pie, use_container_width=True)
@@ -604,7 +604,7 @@ with tab_fat_aba:
     with col_f1:
         st.markdown('<div class="sec">Distribuição do Valor de Fatura</div>', unsafe_allow_html=True)
         fig_hf = px.histogram(df_h, x="valor_fatura", nbins=50,
-                               color_discrete_sequence=["#0b1f56"], marginal="box",
+                               color_discrete_sequence=["#0A40D5"], marginal="box",
                                labels={"valor_fatura":"Valor Fatura (R$)"})
         fig_hf.update_layout(height=300, showlegend=False, **LAYOUT)
         fig_hf.update_traces(marker_line_width=0)
@@ -614,7 +614,7 @@ with tab_fat_aba:
     with col_f2:
         st.markdown('<div class="sec">Fatura vs Pagamento Mínimo</div>', unsafe_allow_html=True)
         fig_sc = px.scatter(df_sc, x="valor_fatura", y="valor_pagamento_minimo",
-                             color_discrete_sequence=["#053877"], opacity=0.35,
+                             color_discrete_sequence=["#044594"], opacity=0.35,
                              labels={"valor_fatura":"Fatura (R$)","valor_pagamento_minimo":"Pgto Mín (R$)"})
         fig_sc.update_traces(marker=dict(size=3))
         fig_sc.update_layout(height=300, **LAYOUT)
@@ -628,7 +628,7 @@ with tab_fat_aba:
 
     col_fx1, col_fx2 = st.columns(2)
     with col_fx1:
-        fig_fx = px.bar(df_fx, x="faixa", y="qtd", color_discrete_sequence=["#2f59cb"],
+        fig_fx = px.bar(df_fx, x="faixa", y="qtd", color_discrete_sequence=["#042171"],
                          text=df_fx["pct"].apply(lambda x: f"{x}%"))
         fig_fx.update_layout(height=260, showlegend=False, **LAYOUT)
         fig_fx.update_traces(textposition="outside", marker_line_width=0)
@@ -639,7 +639,7 @@ with tab_fat_aba:
         fig_fx_pie = px.pie(df_fx, values="qtd", names="faixa",
                              color_discrete_sequence=px.colors.sequential.Blues_r, hole=0.45)
         fig_fx_pie.update_layout(height=260, paper_bgcolor="rgba(0,0,0,0)",
-                                  font=dict(color="#1e3b63"),
+                                  font=dict(color="#031f45"),
                                   legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         fig_fx_pie.update_traces(textfont_size=9)
         st.plotly_chart(fig_fx_pie, use_container_width=True)
@@ -652,7 +652,7 @@ with tab_fat_aba:
     with pc2:
         fig_pct = go.Figure(go.Bar(
             x=list(pcts.keys()), y=list(pcts.values()),
-            marker_color=["#1e3a5f","#1d4ed8","#3b82f6","#60a5fa","#252f3a","#132c49"],
+            marker_color=["#055cf1","#0638c2","#011027","#60a5fa","#252f3a","#132c49"],
             text=[brl(v) for v in pcts.values()],
             textposition="outside", textfont=dict(size=9),
         ))
@@ -682,7 +682,7 @@ with tab_pag_aba:
     with col_p1:
         st.markdown('<div class="sec">Distribuição do Valor de Pagamento</div>', unsafe_allow_html=True)
         fig_ph = px.histogram(df_hp, x="valor_pagamento", nbins=50,
-                               color_discrete_sequence=["#170650"], marginal="box",
+                               color_discrete_sequence=["#125EE1"], marginal="box",
                                labels={"valor_pagamento":"Valor Pago (R$)"})
         fig_ph.update_layout(height=300, showlegend=False, **LAYOUT)
         fig_ph.update_traces(marker_line_width=0)
@@ -692,7 +692,7 @@ with tab_pag_aba:
     with col_p2:
         st.markdown('<div class="sec">Volume Pago por Referência</div>', unsafe_allow_html=True)
         fig_pvol = px.bar(df_sp, x="safra", y="vol_pag",
-                           color_discrete_sequence=["#0c0587"],
+                           color_discrete_sequence=["#203671"],
                            text=[brl(v) for v in df_sp["vol_pag"]],
                            labels={"vol_pag":"Volume Pago (R$)"})
         fig_pvol.update_layout(height=300, showlegend=False, **LAYOUT)
@@ -700,15 +700,15 @@ with tab_pag_aba:
         ax(fig_pvol)
         st.plotly_chart(fig_pvol, use_container_width=True)
 
-    st.markdown('<div class="sec">Aging — Dias entre Vencimento e Pagamento</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec"> Dias entre Vencimento e Pagamento </div>', unsafe_allow_html=True)
     col_ag1, col_ag2 = st.columns(2)
 
     with col_ag1:
         fig_ag = px.histogram(df_aging, x="dias_atraso", nbins=60,
-                               color_discrete_sequence=["#1d0448"],
+                               color_discrete_sequence=["#3964D9"],
                                labels={"dias_atraso":"Dias (negativo = antecipado)"},
                                marginal="box")
-        fig_ag.add_vline(x=0, line_dash="dash", line_color="#19057A", line_width=1.5)
+        fig_ag.add_vline(x=0, line_dash="dash", line_color="#120456", line_width=1.5)
         fig_ag.update_layout(height=300, showlegend=False, **LAYOUT)
         fig_ag.update_traces(marker_line_width=0)
         ax(fig_ag)
@@ -719,13 +719,13 @@ with tab_pag_aba:
         n_atraso = int((df_aging["dias_atraso"] > 0).sum())
         aging_df = pd.DataFrame({"Status":["No prazo / antecipado","Em atraso"],"Qtd":[n_prazo,n_atraso]})
         fig_ag_pie = px.pie(aging_df, values="Qtd", names="Status",
-                             color_discrete_sequence=["#1026B2","#0a05a7"], hole=0.5)
+                             color_discrete_sequence=["#030B42","#0a05a7"], hole=0.5)
         fig_ag_pie.update_layout(height=260, paper_bgcolor="rgba(0,0,0,0)",
-                                  font=dict(color="#075cd3"),
+                                  font=dict(color="#385d90"),
                                   legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         st.plotly_chart(fig_ag_pie, use_container_width=True)
-        st.metric("Mediana aging (dias)", f"{df_aging['dias_atraso'].median():.0f}")
-        st.metric("P75 aging (dias)",     f"{df_aging['dias_atraso'].quantile(0.75):.0f}")
+        st.metric("Media de dias ", f"{df_aging['dias_atraso'].median():.0f}")
+        st.metric("Dias",     f"{df_aging['dias_atraso'].quantile(0.75):.0f}")
 
 # ══════════════════════════════════════════════════════════════
 # ABA 4 — INADIMPLÊNCIA
@@ -766,7 +766,7 @@ with tab_inad:
         fig_vst = px.pie(df_st_i, values="volume", names="status",
                           color="status", color_discrete_map=STATUS_COLORS, hole=0.48)
         fig_vst.update_layout(height=290, paper_bgcolor="rgba(0,0,0,0)",
-                               font=dict(color="#2c74d9"),
+                               font=dict(color="#0d4fab"),
                                legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"))
         st.plotly_chart(fig_vst, use_container_width=True)
 
@@ -776,7 +776,7 @@ with tab_inad:
     with col_is1:
         fig_is = go.Figure()
         fig_is.add_trace(go.Bar(x=df_sp_i["safra"], y=df_sp_i["n_fat"],
-                                 name="Total Faturas", marker_color="#172554"))
+                                 name="Total Faturas", marker_color="#0D3BD5"))
         fig_is.add_trace(go.Bar(x=df_sp_i["safra"], y=df_sp_i["inadimplentes"],
                                  name="Inadimplentes", marker_color="#4A0319"))
         fig_is.update_layout(height=250, barmode="overlay",
@@ -835,7 +835,7 @@ with tab_quality:
 
     st.markdown("""
     <div class='info-box'>
-      <div class='title'>🔬 Garantias da Camada Trusted</div>
+      <div class='title'> Dados da Camada Trusted</div>
       <div class='body'>
         <b style='color:#6b7280'>Tipagem:</b> datas em DATE · valores em DOUBLE · IDs em BIGINT &nbsp;·&nbsp;
         <b style='color:#6b7280'>Deduplicação:</b> por (id_fatura, id_cliente) &nbsp;·&nbsp;
@@ -888,7 +888,7 @@ with tab_quality:
     ax(fig_ref)
     st.plotly_chart(fig_ref, use_container_width=True)
 
-    st.markdown('<div class="sec">Inventário · Camada Trusted</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec"> Camada Trusted </div>', unsafe_allow_html=True)
     inv = pd.DataFrame([
         {"Tabela":"tb_faturas",    "Safras":", ".join(safras_sel), "Formato":"Parquet (snappy)","Partição":"ref","Engine":"DuckDB"},
         {"Tabela":"tb_pagamentos", "Safras":", ".join(safras_sel), "Formato":"Parquet (snappy)","Partição":"ref","Engine":"DuckDB"},
@@ -937,7 +937,7 @@ with tab_cliente:
 
     with col_ctrl3:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🎲 Aleatório", use_container_width=True):
+        if st.button(" Aleatório ", use_container_width=True):
             st.session_state["cliente_selecionado"] = random.choice(lista_clientes)
             st.rerun()
 
@@ -952,7 +952,7 @@ with tab_cliente:
         st.warning(f"Cliente {id_cli} não encontrado.")
     else:
         status_cli  = df_cli_status.loc[df_cli_status["qtd"].idxmax(), "status"] if not df_cli_status.empty else "—"
-        cor_status  = STATUS_COLORS.get(status_cli, "#6b7280")
+        cor_status  = STATUS_COLORS.get(status_cli, "#eef0f4")
         vol_fat_cli = float(df_cli_fat["valor_fatura"].sum())
         vol_pag_cli = float(df_cli_pag["valor_pagamento"].sum()) if not df_cli_pag.empty else 0.0
         saldo_cli   = vol_fat_cli - vol_pag_cli
@@ -1020,7 +1020,7 @@ with tab_cliente:
                 fig_cs = px.pie(df_cli_status, values="qtd", names="status",
                                  color="status", color_discrete_map=STATUS_COLORS, hole=0.5)
                 fig_cs.update_layout(height=240, paper_bgcolor="rgba(0,0,0,0)",
-                                      font=dict(color="#12233a"),
+                                      font=dict(color="#dfd4d8"),
                                       legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
                                       margin=dict(l=10, r=10, t=10, b=10))
                 st.plotly_chart(fig_cs, use_container_width=True)
@@ -1030,7 +1030,7 @@ with tab_cliente:
             fig_tl = go.Figure()
             df_fat_g = df_cli_fat.groupby("safra")["valor_fatura"].sum().reset_index()
             fig_tl.add_trace(go.Bar(x=df_fat_g["safra"], y=df_fat_g["valor_fatura"],
-                                     name="Fatura", marker_color="#052d5f",
+                                     name="Fatura", marker_color="#031e3e",
                                      text=[brl(v) for v in df_fat_g["valor_fatura"]],
                                      textposition="outside", textfont=dict(size=9)))
             if not df_cli_pag.empty:
