@@ -134,8 +134,8 @@ def ax(fig):
     return fig
 
 STATUS_COLORS = {
-    "Pago no Prazo":    "#0C1EE9",
-    "Pago em Atraso":   "#14026b",
+    "Pagamento no Prazo":    "#0C1EE9",
+    "Pagamento em Atraso":   "#14026b",
     "Abaixo do Mínimo": "#6B0303",
     "Sem Pagamento":    "#450101",
 }
@@ -1015,7 +1015,7 @@ with tab_cliente:
         with col_g1:
             if not df_cli_status.empty:
                 st.markdown("**Status das Faturas**")
-                fig_cs = px.pie(df_cli_status, values="qtd", names="status",
+                fig_cs = px.pie(df_cli_status, values="qtd",
                                  color="status", color_discrete_map=STATUS_COLORS, hole=0.5)
                 fig_cs.update_layout(height=240, paper_bgcolor="rgba(0,0,0,0)",
                                       font=dict(color="#dfd4d8"),
