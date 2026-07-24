@@ -2,7 +2,7 @@
 Dashboard Executivo e Técnico — Data Lake PoD Cartões
 Visualização das camadas Trusted e Refined (Feature Store / Book de Variáveis).
 Engine: DuckDB + Parquet.
-Design inspirado nos princípios do livro 'Storytelling com Dados' (Cole Nussbaumer Knaflic).
+
 """
 
 import io
@@ -15,8 +15,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 # ══════════════════════════════════════════════════════════════
-# CONFIGURAÇÃO DA PÁGINA & PALETA DE CORES (AZUL, ROXO E CINZA)
-# ══════════════════════════════════════════════════════════════
+# CONFIGURAÇÃO DA PÁGINA & PALETA DE CORES
+
 st.set_page_config(
     page_title="PoD Cartões — Analytics",
     layout="wide",
@@ -70,8 +70,8 @@ st.markdown("""
 
 
 # ══════════════════════════════════════════════════════════════
-# CONEXÃO DUCKDB — Regras de Pagamento & Medallion Architecture
-# ══════════════════════════════════════════════════════════════
+# CONEXÃO DUCKDB — Regras de Pagamento & Arquitetura
+
 @st.cache_resource
 def init_db() -> duckdb.DuckDBPyConnection:
     script_dir = Path(__file__).resolve().parent
@@ -190,7 +190,7 @@ def export_csv_button(df: pd.DataFrame, filename: str, label: str = "Exportar da
 
 # ══════════════════════════════════════════════════════════════
 # SIDEBAR — Filtro por Mês/Ano
-# ══════════════════════════════════════════════════════════════
+
 st.sidebar.title("PoD Cartões")
 st.sidebar.caption("Data Lake & Analytics")
 st.sidebar.markdown("---")
@@ -227,8 +227,8 @@ st.sidebar.markdown(f"**Período Selecionado:** `{periodo_label}`")
 
 # ══════════════════════════════════════════════════════════════
 # PAINEL PRINCIPAL
-# ══════════════════════════════════════════════════════════════
-st.title("Monitoramento Executivo")
+
+st.title("Monitoramento e Governança dos Dados")
 
 aba_geral, aba_churn, aba_fat, aba_pag, aba_inad, aba_perfil, aba_book, aba_qual = st.tabs([
     "Visão Geral",
@@ -242,9 +242,9 @@ aba_geral, aba_churn, aba_fat, aba_pag, aba_inad, aba_perfil, aba_book, aba_qual
 ])
 
 
-# ──────────────────────────────────────────────────────────────
-# ABA 1: VISÃO GERAL EXECUTIVA (Recomendação Storytelling)
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+# ABA 1: VISÃO GERAL  
+
 with aba_geral:
     df_kpi = q(f"""
         SELECT
@@ -396,7 +396,7 @@ with aba_geral:
 
 # ──────────────────────────────────────────────────────────────
 # ABA 2: CHURN & ATIVIDADE DA CARTEIRA
-# ──────────────────────────────────────────────────────────────
+
 with aba_churn:
     st.subheader("Análise de Retenção, Inatividade & Motivos de Churn")
     st.caption("Acompanhe o volume de clientes que deixaram de gerar faturas no tempo e diagnostique a causa do abandono.")
@@ -613,7 +613,7 @@ with aba_churn:
 
 # ──────────────────────────────────────────────────────────────
 # ABA 3: FATURAS
-# ──────────────────────────────────────────────────────────────
+
 with aba_fat:
     st.subheader("Distribuição e Faixas do Valor de Fatura")
     
@@ -723,7 +723,7 @@ with aba_fat:
 
 # ──────────────────────────────────────────────────────────────
 # ABA 4: PAGAMENTOS
-# ──────────────────────────────────────────────────────────────
+
 with aba_pag:
     st.subheader("Estatus de Pagamento e Faixas de Atraso")
 
@@ -828,7 +828,7 @@ with aba_pag:
 
 # ──────────────────────────────────────────────────────────────
 # ABA 5: INADIMPLÊNCIA & PERFIL INTEGRADO 
-# ──────────────────────────────────────────────────────────────
+
 with aba_inad:
     st.subheader("Cobrança & Gestão de Risco")
     st.caption("Clique em qualquer cliente na tabela para atualizar o histórico.")
@@ -923,7 +923,7 @@ with aba_inad:
 
 # ──────────────────────────────────────────────────────────────
 # ABA 6: PERFIL DO CLIENTE
-# ──────────────────────────────────────────────────────────────
+
 with aba_perfil:
     st.subheader("Busca Direta por ID de Cliente")
     id_busca = st.number_input("Digite o ID do Cliente:", min_value=1, value=343, step=1)
@@ -938,7 +938,7 @@ with aba_perfil:
 
 # ──────────────────────────────────────────────────────────────
 # ABA 7: FEATURE STORE (BOOK DE VARIÁVEIS)
-# ──────────────────────────────────────────────────────────────
+
 with aba_book:
     st.info("""
         **Camada Refined (Feature Store) para Machine Learning:**  
@@ -966,7 +966,7 @@ with aba_book:
 
 # ──────────────────────────────────────────────────────────────
 # ABA 8: QUALIDADE DOS DADOS 
-# ──────────────────────────────────────────────────────────────
+
 with aba_qual:
     st.subheader("Diagnóstico e Integridade dos Dados")
     
