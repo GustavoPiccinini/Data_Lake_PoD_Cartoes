@@ -1,23 +1,43 @@
 """
 Camada Trusted — Fatura (raw -> trusted/tb_01_fatura)
+Suporte para fallback automatico em pastas de reserva/backup.
 """
 import argparse
 import os
 import sys
 from datetime import datetime
-
-python_path = r"C:\Data_Lake_PoD_Cartoes\.venv\Scripts\python.exe"
-
-os.environ["PYSPARK_PYTHON"] = python_path
-os.environ["PYSPARK_DRIVER_PYTHON"] = python_path
-os.environ["HADOOP_HOME"] = "C:\\hadoop"
-os.environ["hadoop.home.dir"] = "C:\\hadoop"
+from pathlib import Path
 
 from pyspark.sql import SparkSession
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common.lake import layer_path, resolve_lake_root  # noqa: E402
 from common.observability import check_integrity, record_lineage  # noqa: E402
+
+
+def get_raw_file_path(lake_root: str, dataset: str, raw_filename: str) -> str:
+    """Busca o arquivo na pasta oficial raw. Se nao encontrar, busca nas pastas de backup."""
+    raw_dir = Path(layer_path(lake_root, "raw", dataset))
+    official_file = raw_dir / raw_filename
+
+    if official_file.exists():
+        return str(official_file)
+
+    # Busca em repositorios de reserva dentro da camada raw
+    raw_base_dir = Path(layer_path(lake_root, "raw"))
+    backup_sources = [
+        raw_base_dir / "backup_01" / dataset / raw_filename,
+        raw_base_dir / "backup_02" / dataset / raw_filename,
+    ]
+
+    for backup_file in backup_sources:
+        if backup_file.exists():
+            print(f"[AVISO] Arquivo '{raw_filename}' nao encontrado na pasta oficial. Carregando da reserva: '{backup_file}'")
+            return str(backup_file)
+
+    raise FileNotFoundError(
+        f"Arquivo '{raw_filename}' nao encontrado em '{official_file}' nem nos backups (backup_01, backup_02)."
+    )
 
 
 def main(raw_file: str, lake_root: str | None):
@@ -37,15 +57,14 @@ def main(raw_file: str, lake_root: str | None):
     
     dt_proc = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    raw_dir = layer_path(lake_root, "raw", "fatura")
-    raw_path = os.path.join(raw_dir, raw_file) if not raw_file.startswith(raw_dir) else raw_file
+    # Resolve o caminho com suporte a busca em pastas de reserva
+    raw_path = get_raw_file_path(lake_root, "fatura", raw_file)
 
     df_fatura = spark.read.option("header", "true").csv(raw_path)
     qtd_raw = df_fatura.count()
     print(f"[fatura] {qtd_raw} registros lidos de {raw_path}")
     df_fatura.createOrReplaceTempView("df_fatura")
 
-    # Mapeamento exato do seu CSV real
     df_fatura_format = spark.sql(f"""
         select
             cast(regexp_replace(cast(id_fatura as string), '[^0-9]', '') as bigint) as id_fatura,

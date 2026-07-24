@@ -12,18 +12,18 @@ import time
 
 # 1. Raiz do projeto e do Data Lake
 ROOT = Path(__file__).parent.resolve()
-LAKE_ROOT = ROOT / "datalake"
+LAKE_ROOT = (ROOT / "datalake").resolve()
 
-# 2. Caminhos das pastas brutas
+# 2. Caminhos das pastas brutas oficiais
 PASTA_RAW_FATURA = LAKE_ROOT / "raw" / "fatura"
 PASTA_RAW_PAGAMENTO = LAKE_ROOT / "raw" / "pagamento"
 
 
-def executar(comando: list):
+def executar(comando: list[str]) -> None:
     """Executa subprocessos do Python exibindo tempo e tratando erros."""
     print("=" * 70)
     print("Executando:")
-    print(" ".join(str(c) for c in comando))
+    print(" ".join(comando))
     print("=" * 70)
 
     inicio = time.perf_counter()
@@ -36,18 +36,41 @@ def executar(comando: list):
     tempo = time.perf_counter() - inicio
 
     if resultado.returncode != 0:
-        print("\n Erro durante a execução do comando!")
+        print("\nErro durante a execução do comando!")
         sys.exit(resultado.returncode)
 
-    print(f" Concluído em {tempo:.2f} segundos\n")
+    print(f"Concluído em {tempo:.2f} segundos\n")
 
 
-def ultimo_csv(pasta: Path) -> Path:
-    """Retorna o arquivo CSV mais recente dentro do diretório especificado."""
-    arquivos = list(pasta.glob("*.csv"))
-    if not arquivos:
-        raise FileNotFoundError(f"Nenhum CSV encontrado em {pasta}")
-    return max(arquivos, key=lambda arq: arq.stat().st_mtime)
+def ultimo_csv(pasta_oficial: Path, dataset_tipo: str) -> Path:
+    """
+    Retorna o arquivo CSV mais recente da pasta oficial.
+    Se a pasta oficial não existir ou estiver vazia, busca nos backups.
+    """
+    # 1. Tenta buscar na pasta oficial se ela existir
+    if pasta_oficial.exists():
+        arquivos = list(pasta_oficial.glob("*.csv"))
+        if arquivos:
+            return max(arquivos, key=lambda arq: arq.stat().st_mtime)
+
+    # 2. Fallback: Procura nos diretórios de backup_01 e backup_02
+    raw_base = LAKE_ROOT / "raw"
+    backups = [
+        raw_base / "backup_01" / dataset_tipo,
+        raw_base / "backup_02" / dataset_tipo,
+    ]
+
+    for b_path in backups:
+        if b_path.exists():
+            arquivos_backup = list(b_path.glob("*.csv"))
+            if arquivos_backup:
+                escolhido = max(arquivos_backup, key=lambda arq: arq.stat().st_mtime)
+                print(f"[AVISO main.py] Pasta oficial '{dataset_tipo}' indisponível ou vazia. Carregando da reserva: '{escolhido.name}'")
+                return escolhido
+
+    raise FileNotFoundError(
+        f"Nenhum arquivo CSV foi encontrado para '{dataset_tipo}' na pasta oficial nem em backup_01/backup_02."
+    )
 
 
 def main():
@@ -57,9 +80,12 @@ def main():
     print("PIPELINE DATA LAKE - PoD CARTÕES")
     print("=" * 70)
 
-    # Descobre os arquivos mais recentes em cada subpasta de forma dinâmica
-    arquivo_fatura = ultimo_csv(PASTA_RAW_FATURA).name
-    arquivo_pagamento = ultimo_csv(PASTA_RAW_PAGAMENTO).name
+    # Descobre os arquivos mais recentes (com fallback automático para backup)
+    fatura_path = ultimo_csv(PASTA_RAW_FATURA, "fatura")
+    pagamento_path = ultimo_csv(PASTA_RAW_PAGAMENTO, "pagamento")
+
+    arquivo_fatura = fatura_path.name
+    arquivo_pagamento = pagamento_path.name
 
     print(f"LAKE_ROOT..........: {LAKE_ROOT}")
     print(f"Arquivo Fatura.....: {arquivo_fatura}")
@@ -70,7 +96,7 @@ def main():
     # -----------------------------------------------------------------
     executar([
         sys.executable,
-        "processing/01_fatura_trusted.py",
+        str(ROOT / "processing" / "01_fatura_trusted.py"),
         "--raw-file", arquivo_fatura,
         "--lake-root", str(LAKE_ROOT)
     ])
@@ -80,7 +106,7 @@ def main():
     # -----------------------------------------------------------------
     executar([
         sys.executable,
-        "processing/02_pagamento_trusted.py",
+        str(ROOT / "processing" / "02_pagamento_trusted.py"),
         "--raw-file", arquivo_pagamento,
         "--lake-root", str(LAKE_ROOT)
     ])
@@ -90,7 +116,7 @@ def main():
     # -----------------------------------------------------------------
     executar([
         sys.executable,
-        "processing/03_book_variaveis.py",
+        str(ROOT / "processing" / "03_book_variaveis.py"),
         "--lake-root", str(LAKE_ROOT)
     ])
 

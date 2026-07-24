@@ -4,7 +4,8 @@ __pycache__/
 venv/
 .env
 
-datalake/
-
 .ipynb_checkpoints/
 .DS_Store
+
+# Ignora a pasta acidental criada no terminal (se houver)
+\{*

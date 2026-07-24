@@ -1,17 +1,10 @@
 """
-Book de Variáveis (002_trusted -> 003_refined/book_fatura)
+Book de Variaveis (002_trusted -> 003_refined/book_fatura)
 """
 import argparse
 import os
 import sys
 from datetime import datetime
-
-python_path = r"C:\Data_Lake_PoD_Cartoes\.venv\Scripts\python.exe"
-
-os.environ["PYSPARK_PYTHON"] = python_path
-os.environ["PYSPARK_DRIVER_PYTHON"] = python_path
-os.environ["HADOOP_HOME"] = "C:\\hadoop"
-os.environ["hadoop.home.dir"] = "C:\\hadoop"
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, row_number
@@ -36,7 +29,7 @@ for fbc in FBCS:
 
 
 def dedup_latest(df, key_cols: list):
-    """Mantém só o registro mais recente (maior dt_proc) por chave."""
+    """Manten so o registro mais recente (maior dt_proc) por chave."""
     w = Window.partitionBy(*key_cols).orderBy(col("dt_proc").desc())
     return (
         df.withColumn("_rn", row_number().over(w))
@@ -51,13 +44,11 @@ def build_book_query() -> str:
         janela_col = JANELAS[janela_nome]
         janela_cond = "1=1" if janela_col is None else f"{janela_col} = 1"
         
-        # Para somas e contagens, substitui NULL por 0
         if agg in ("SUM", "COUNT"):
             metric_expr = (
                 f"COALESCE({agg}(CASE WHEN fbc_classificacao_pagamento = '{fbc}' AND {janela_cond} "
                 f"THEN {coluna_valor} END), 0) AS {nome_metrica}"
             )
-        # Para Média, Mínimo e Máximo (ex: média de dias de atraso), mantém NULL quando não houve atraso
         else:
             metric_expr = (
                 f"{agg}(CASE WHEN fbc_classificacao_pagamento = '{fbc}' AND {janela_cond} "
@@ -141,7 +132,6 @@ def main(ref_date_str: str | None, lake_root: str | None):
     """)
     tb_classificado.createOrReplaceTempView("tb_classificado")
 
-    # Define a data limite para o cálculo de atraso
     ref_eval_date = f"'{ref_date_str}'" if ref_date_str else "coalesce(data_pagamento, data_vencimento)"
 
     tb_dias_atraso = spark.sql(f"""
@@ -175,7 +165,6 @@ def main(ref_date_str: str | None, lake_root: str | None):
     stage_path = layer_path(lake_root, "refined", "stage_fatura")
     stage.write.mode("append").partitionBy("ref").parquet(stage_path)
 
-    # Ajuste de Janelas Temporais: Calcula a janela relativa à data de emissão
     date_anchor = f"cast('{ref_date_str}' as date)" if ref_date_str else "max(data_emissao) over (partition by id_cliente)"
 
     janela_de_tempo = spark.sql(f"""
@@ -219,7 +208,7 @@ def main(ref_date_str: str | None, lake_root: str | None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ref-date", required=False, default=None, help="data de referência (opcional, formato YYYY-MM-DD)")
+    parser.add_argument("--ref-date", required=False, default=None, help="data de referencia (opcional, formato YYYY-MM-DD)")
     parser.add_argument("--lake-root", default=None)
     args = parser.parse_args()
     main(args.ref_date, args.lake_root)
