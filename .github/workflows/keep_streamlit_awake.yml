@@ -47,7 +47,7 @@ jobs:
           )
 
           try:
-              url = "https://datalakepodcartoes.streamlit.app/"
+              url = "https://datalakecartoes.streamlit.app/"
               print(f"Acessando {url}")
               driver.get(url)
 
