@@ -1,0 +1,13 @@
+services:
+  datalake-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pod_cartoes_datalake
+    volumes:
+      - ./datalake:/app/datalake
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Força o PySpark a usar o Python nativo do container Linux
+      - PYSPARK_PYTHON=/app/.venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/app/.venv/bin/python
