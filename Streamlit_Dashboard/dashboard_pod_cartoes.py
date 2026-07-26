@@ -32,7 +32,7 @@ COLOR_MAP_STATUS = {
     "Pagamento Antecipado": COLOR_ANTECIPADO,
     "Pagamento em Dia": COLOR_EM_DIA,
     "Em Atraso": COLOR_ATRASO,
-    "Inadimplente (Sem Pagamento)": COLOR_INADIMPLENTE,
+    "Inadimplente": COLOR_INADIMPLENTE,
 }
 
 COLOR_MAP_RETENCAO = {
@@ -150,7 +150,7 @@ def init_db() -> duckdb.DuckDBPyConnection:
             COALESCE(p.valor_pagamento, 0) AS valor_pagamento,
             GREATEST(0, DATEDIFF('day', f.data_vencimento, COALESCE(p.data_pagamento, CURRENT_DATE))) AS dias_atraso,
             CASE
-                WHEN p.data_pagamento IS NULL THEN 'Inadimplente (Sem Pagamento)'
+                WHEN p.data_pagamento IS NULL THEN 'Inadimplente'
                 WHEN p.data_pagamento < f.data_vencimento THEN 'Pagamento Antecipado'
                 WHEN p.data_pagamento = f.data_vencimento THEN 'Pagamento em Dia'
                 ELSE 'Em Atraso'
@@ -243,7 +243,7 @@ aba_geral, aba_churn, aba_fat, aba_pag, aba_inad, aba_perfil, aba_book, aba_qual
 
 
 # ══════════════════════════════════════════════════════════════
-# ABA 1: VISÃO GERAL  
+# ABA 1: VISÃO GERAL 
 
 with aba_geral:
     df_kpi = q(f"""
@@ -252,7 +252,7 @@ with aba_geral:
             COUNT(DISTINCT CASE WHEN status = 'Pagamento Antecipado' THEN id_cliente END)                   AS cli_antecipados,
             COUNT(DISTINCT CASE WHEN status = 'Pagamento em Dia' THEN id_cliente END)                       AS cli_em_dia,
             COUNT(DISTINCT CASE WHEN status = 'Em Atraso' THEN id_cliente END)                             AS cli_atraso,
-            COUNT(DISTINCT CASE WHEN status = 'Inadimplente (Sem Pagamento)' THEN id_cliente END)           AS cli_inad,
+            COUNT(DISTINCT CASE WHEN status = 'Inadimplente' THEN id_cliente END)           AS cli_inad,
             COALESCE(SUM(valor_fatura), 0)                                                                  AS vol_faturado,
             COALESCE(SUM(valor_pagamento), 0)                                                               AS vol_pago,
             COALESCE(SUM(valor_fatura - valor_pagamento), 0)                                                AS vol_devedor
@@ -275,22 +275,26 @@ with aba_geral:
     c5.metric("Inadimplência Crítica", f"{c_ind:,}", delta=f"{(c_ind/tot_cli*100):.1f}% sem pgto", delta_color="inverse")
 
     st.markdown("---")
+    
+    # LAYOUT ORIGINAL EM 2 COLUNAS (1.3 / 0.7)
     g1, g2 = st.columns([1.3, 0.7])
 
     with g1:
         st.subheader("Evolução Temporal dos Indicadores")
         
+        # "Todas as Categorias" EM PRIMEIRO
         opcoes_filtro_status = [
-            "Todas as Categorias", 
+            "Todas as Categorias",
             "Pagamento Antecipado", 
             "Pagamento em Dia", 
             "Em Atraso", 
-            "Inadimplente (Sem Pagamento)"
+            "Inadimplente"
         ]
         
         metric_opt = st.radio(
             "Selecione o filtro temporal por categoria:",
             opcoes_filtro_status,
+            index=0,
             horizontal=True,
             key="radio_visao_geral"
         )
@@ -306,37 +310,49 @@ with aba_geral:
             ORDER BY data_referencia
         """)
 
-        if metric_opt != "Todas as Categorias":
-            df_plot_evol = df_evolucao_status[df_evolucao_status["status"] == metric_opt]
-            modo_barra = "group"
-            pos_texto = "outside"
+        if metric_opt == "Todas as Categorias":
+            # LINHAS TEMPORAIS PARA CADA CATEGORIA
+            fig_evol = px.line(
+                df_evolucao_status, x="mes_ano", y="Volume_M", color="status",
+                color_discrete_map=COLOR_MAP_STATUS, markers=True
+            )
+            fig_evol.update_traces(line=dict(width=2.5), marker=dict(size=6))
         else:
-            df_plot_evol = df_evolucao_status
-            modo_barra = "stack"
-            pos_texto = "auto"
+            # BARRAS PARA CATEGORIA INDIVIDUAL
+            df_plot_evol = df_evolucao_status[df_evolucao_status["status"] == metric_opt]
+            fig_evol = px.bar(
+                df_plot_evol, x="mes_ano", y="Volume_M", color="status",
+                color_discrete_map=COLOR_MAP_STATUS, text_auto=".2f"
+            )
+            fig_evol.update_traces(textposition="outside", cliponaxis=False)
 
-        fig_evol = px.bar(
-            df_plot_evol, x="mes_ano", y="Volume_M", color="status", barmode=modo_barra,
-            color_discrete_map=COLOR_MAP_STATUS,
-            text_auto=".2f"
-        )
-        fig_evol.update_traces(textposition=pos_texto, cliponaxis=False)
         fig_evol.update_layout(
-            height=400, margin=dict(l=20, r=20, t=30, b=20),
-            xaxis_title=None, yaxis_title="Volume Faturado (R$ Milhões)",
-            legend_title=None, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            height=400,
+            margin=dict(l=20, r=20, t=30, b=20),
+            xaxis_title=None, 
+            yaxis_title="Volume Faturado (R$ Mi)",
+            legend_title=None, 
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            hovermode="x unified",
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=False)
         )
-        st.plotly_chart(fig_evol, width='stretch')
+        st.plotly_chart(fig_evol, width='stretch', config={'displayModeBar': False})
 
     with g2:
         where_pie_geral = "data_referencia = (SELECT MAX(data_referencia) FROM vw_join)" if mes_selecionado == "Todos os Meses" else where_mes
         lbl_pie_geral = "Última Safra" if mes_selecionado == "Todos os Meses" else f"Safra {periodo_label}"
 
         st.subheader(f"Distribuição ({lbl_pie_geral})")
-        df_status = q(f"SELECT status, COUNT(*) as qtd, SUM(valor_fatura) as volume_bruto FROM vw_join WHERE {where_pie_geral} GROUP BY status ORDER BY qtd ASC")
+        df_status = q(f"""
+            SELECT status, COUNT(*) as qtd, SUM(valor_fatura) as volume_bruto 
+            FROM vw_join 
+            WHERE {where_pie_geral} 
+            GROUP BY status 
+            ORDER BY qtd DESC
+        """)
         
         if not df_status.empty:
-            # STORYTELLING COM DADOS: Barras Horizontais em vez de Pizza/Rosca
             fig_bar_h = px.bar(
                 df_status, y="status", x="qtd", orientation="h",
                 color="status", color_discrete_map=COLOR_MAP_STATUS,
@@ -344,8 +360,13 @@ with aba_geral:
             )
             fig_bar_h.update_traces(textposition="outside", cliponaxis=False)
             fig_bar_h.update_layout(
-                height=340, showlegend=False, margin=dict(l=10, r=20, t=20, b=10),
-                xaxis_title="Qtd Faturas", yaxis_title=None
+                height=340, 
+                showlegend=False, 
+                margin=dict(l=10, r=30, t=20, b=10),
+                xaxis_title="Qtd Faturas", 
+                yaxis_title=None,
+                yaxis=dict(autorange="reversed"),
+                xaxis=dict(showgrid=False)
             )
             st.plotly_chart(fig_bar_h, width='stretch')
 
@@ -401,9 +422,11 @@ with aba_churn:
     st.subheader("Análise de Retenção, Inatividade & Motivos de Churn")
     st.caption("Acompanhe o volume de clientes que deixaram de gerar faturas no tempo e diagnostique a causa do abandono.")
 
+    # "Todas as Categorias" EM PRIMEIRO
     cat_churn_sel = st.radio(
         "Filtrar Categoria no Gráfico Temporal:",
         ["Todas as Categorias", "Ativo em Dia", "Ativo em Atraso", "Inativo / Churn"],
+        index=0,
         horizontal=True,
         key="radio_churn_cat"
     )
@@ -446,33 +469,38 @@ with aba_churn:
         ORDER BY data_referencia, categoria_retencao
     """)
 
-    if cat_churn_sel != "Todas as Categorias":
-        df_churn_plot = df_churn_evol[df_churn_evol["categoria_retencao"] == cat_churn_sel]
-        modo_b_churn = "group"
-        pos_texto = "outside"
-    else:
-        df_churn_plot = df_churn_evol
-        modo_b_churn = "stack"
-        pos_texto = "auto"
-
+    # LAYOUT ORIGINAL EM 2 COLUNAS (1.3 / 0.7)
     col_ch1, col_ch2 = st.columns([1.3, 0.7])
 
     with col_ch1:
         st.markdown("##### Evolução Temporal da Base de Clientes")
-        fig_churn = px.bar(
-            df_churn_plot, x="mes_ano", y="qtd_clientes", color="categoria_retencao",
-            color_discrete_map=COLOR_MAP_RETENCAO,
-            barmode=modo_b_churn,
-            text_auto=True
-        )
-        fig_churn.update_traces(textposition=pos_texto, cliponaxis=False)
+        
+        if cat_churn_sel == "Todas as Categorias":
+            # LINHAS TEMPORAIS PARA CADA CATEGORIA DE RETENÇÃO
+            fig_churn = px.line(
+                df_churn_evol, x="mes_ano", y="qtd_clientes", color="categoria_retencao",
+                color_discrete_map=COLOR_MAP_RETENCAO, markers=True
+            )
+            fig_churn.update_traces(line=dict(width=2.5), marker=dict(size=6))
+        else:
+            # BARRAS PARA CATEGORIA SELECIONADA
+            df_churn_plot = df_churn_evol[df_churn_evol["categoria_retencao"] == cat_churn_sel]
+            fig_churn = px.bar(
+                df_churn_plot, x="mes_ano", y="qtd_clientes", color="categoria_retencao",
+                color_discrete_map=COLOR_MAP_RETENCAO, text_auto=True
+            )
+            fig_churn.update_traces(textposition="outside", cliponaxis=False)
+
         fig_churn.update_layout(
             height=420, 
             margin=dict(l=10, r=10, t=30, b=20),
             xaxis_title=None, 
             yaxis_title="Qtd Clientes", 
             legend_title=None,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            hovermode="x unified",
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=False)
         )
         st.plotly_chart(fig_churn, width='stretch')
 
@@ -499,10 +527,9 @@ with aba_churn:
             FROM todos_clientes tc
             LEFT JOIN clientes_referencia cr ON tc.id_cliente = cr.id_cliente
             GROUP BY diagnostico
-            ORDER BY total ASC
+            ORDER BY total DESC
         """)
 
-        # STORYTELLING COM DADOS: Barras Horizontais para Retenção
         fig_diag_h = px.bar(
             df_diagnostico, y="diagnostico", x="total", orientation="h",
             color="diagnostico", color_discrete_map=COLOR_MAP_RETENCAO,
@@ -510,8 +537,13 @@ with aba_churn:
         )
         fig_diag_h.update_traces(textposition="outside", cliponaxis=False)
         fig_diag_h.update_layout(
-            height=360, showlegend=False, margin=dict(l=10, r=20, t=20, b=10),
-            xaxis_title="Qtd Clientes", yaxis_title=None
+            height=360, 
+            showlegend=False, 
+            margin=dict(l=10, r=30, t=20, b=10),
+            xaxis_title="Qtd Clientes", 
+            yaxis_title=None,
+            yaxis=dict(autorange="reversed"),
+            xaxis=dict(showgrid=False)
         )
         st.plotly_chart(fig_diag_h, width='stretch')
 
@@ -591,7 +623,7 @@ with aba_churn:
 
             cli_inativo_sel = st.session_state["cli_churn_sel"]
 
-            st.markdown(f"### Histórico do Cliente #{cli_inativo_sel}")
+            st.markdown(f"### Histórico do Cliente Id {cli_inativo_sel}")
             
             df_cli_detalhe = q(f"""
                 SELECT
@@ -609,8 +641,6 @@ with aba_churn:
                 width='stretch', 
                 height=330
             )
-
-
 # ──────────────────────────────────────────────────────────────
 # ABA 3: FATURAS
 
