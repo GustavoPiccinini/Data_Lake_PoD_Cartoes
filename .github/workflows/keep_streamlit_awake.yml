@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  ping:
+  keep-alive:
     runs-on: ubuntu-latest
-
     timeout-minutes: 10
 
     steps:
@@ -31,33 +30,31 @@ jobs:
 
       - name: Verificar Chrome
         run: |
-          google-chrome --version || true
+          google-chrome --version
 
-      - name: Abrir aplicação Streamlit
+      - name: Acessar aplicação
         run: |
           python << 'EOF'
 
-          import os
           import time
 
           from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
           from selenium.webdriver.common.by import By
           from selenium.webdriver.support.ui import WebDriverWait
           from selenium.webdriver.support import expected_conditions as EC
-          from selenium.webdriver.chrome.options import Options
 
           URL = "https://datalakecartoes.streamlit.app/"
 
           options = Options()
-
           options.add_argument("--headless=new")
           options.add_argument("--no-sandbox")
           options.add_argument("--disable-dev-shm-usage")
-          options.add_argument("--window-size=1920,1080")
           options.add_argument("--disable-gpu")
+          options.add_argument("--window-size=1920,1080")
 
           print("=" * 80)
-          print("Abrindo navegador...")
+          print("Abrindo navegador")
           print("=" * 80)
 
           driver = webdriver.Chrome(options=options)
@@ -68,13 +65,15 @@ jobs:
 
               driver.get(URL)
 
-              wait = WebDriverWait(driver, 60)
-
-              wait.until(
+              WebDriverWait(driver, 90).until(
                   EC.presence_of_element_located((By.TAG_NAME, "body"))
               )
 
-              time.sleep(15)
+              WebDriverWait(driver, 90).until(
+                  lambda d: "PoD Cartões" in d.title
+              )
+
+              time.sleep(10)
 
               print("=" * 80)
               print("Título:")
@@ -85,45 +84,21 @@ jobs:
               print(driver.current_url)
 
               print("=" * 80)
-              print("Primeiros 1500 caracteres da página:")
-              print(driver.page_source[:1500])
+              print("Screenshot...")
 
-              screenshot = "streamlit.png"
-              driver.save_screenshot(screenshot)
+              driver.save_screenshot("streamlit.png")
 
-              print("=" * 80)
-              print(f"Screenshot salvo em {screenshot}")
-
-              html = driver.page_source.lower()
-
-              erros = [
-                  "error",
-                  "404",
-                  "500",
-                  "not found",
-                  "this app has gone to sleep",
-                  "app is sleeping",
-              ]
-
-              encontrou = False
-
-              for erro in erros:
-                  if erro in html:
-                      encontrou = True
-                      print(f"Encontrado: {erro}")
-
-              if encontrou:
-                  raise Exception("A aplicação respondeu com uma página de erro.")
+              print("Screenshot salvo.")
 
               print("=" * 80)
-              print("Aplicação acessada com sucesso.")
+              print("Aplicação carregada com sucesso!")
 
           finally:
               driver.quit()
 
           EOF
 
-      - name: Enviar screenshot
+      - name: Upload Screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
