@@ -1,4 +1,4 @@
-# Data Lake — PoD Cartões
+# Data Lake — PoD Cartões  link para o dashboard = https://datalakecartoes.streamlit.app/
 
 Data Lake e Plataforma Analytics para a PoD Cartões: consolidação de faturas e pagamentos, cálculo de inadimplência, Feature Store / Book de Variáveis (U1M/U3M/U6M/U12M) para risco de crédito e Dashboard Executivo Interativo.
 
