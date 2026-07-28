@@ -65,13 +65,14 @@ def main(raw_file: str, lake_root: str | None):
     print(f"[pagamento] {qtd_raw} registros lidos de {raw_path}")
     df_pagamento.createOrReplaceTempView("df_pagamento")
 
+    # SQL Ajustado: Chaves convertidas para INT e Safra com date_format seguro
     df_pagamento_format = spark.sql(f"""
         select
-            cast(regexp_replace(cast(id_pagamento as string), '[^0-9]', '') as bigint) as id_pagamento,
-            cast(regexp_replace(cast(id_fatura as string), '[^0-9]', '') as bigint) as id_fatura,
-            cast(id_cliente as bigint) as id_cliente,
+            cast(regexp_replace(cast(id_pagamento as string), '[^0-9]', '') as int) as id_pagamento,
+            cast(regexp_replace(cast(id_fatura as string), '[^0-9]', '') as int) as id_fatura,
+            cast(id_cliente as int) as id_cliente,
             "{dt_proc}" as dt_proc,
-            substring(replace(cast(dt_pagamento as string), '-', ''), 1, 6) as ref,
+            date_format(cast(dt_pagamento as date), 'yyyyMM') as ref,
             cast(dt_pagamento as date) as data_pagamento,
             cast(valor_pagamento as decimal(15,2)) as valor_pagamento
         from df_pagamento
@@ -91,6 +92,9 @@ def main(raw_file: str, lake_root: str | None):
     trusted_path = layer_path(lake_root, "trusted", "tb_02_pagamento")
     df_pagamento_format.write.mode("append").partitionBy("ref").parquet(trusted_path)
     print(f"[pagamento] gravado em {trusted_path}")
+
+    # Libera o cache de memória alocado
+    df_pagamento_format.unpersist()
 
     record_lineage(
         spark, lake_root,

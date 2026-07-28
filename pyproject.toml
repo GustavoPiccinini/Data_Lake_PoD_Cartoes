@@ -5,11 +5,15 @@ description = "Data Lake PoD Cartões — reconstruído: local/S3, uv, linhagem 
 requires-python = ">=3.10"
 dependencies = [
     "duckdb>=1.5.5",
+    "ipykernel>=7.3.0",
+    "matplotlib>=3.10.9",
     "openpyxl>=3.1.5",
+    "pandas>=2.3.3",
     "plotly>=6.9.0",
     "pyarrow>=25.0.0",
     "pyspark>=3.3",
     "python-dateutil",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]

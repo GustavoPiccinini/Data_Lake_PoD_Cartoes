@@ -2,6 +2,7 @@
 Camada Trusted — Fatura (raw -> trusted/tb_01_fatura)
 Suporte para fallback automatico em pastas de reserva/backup.
 """
+
 import argparse
 import os
 import sys
@@ -32,7 +33,9 @@ def get_raw_file_path(lake_root: str, dataset: str, raw_filename: str) -> str:
 
     for backup_file in backup_sources:
         if backup_file.exists():
-            print(f"[AVISO] Arquivo '{raw_filename}' nao encontrado na pasta oficial. Carregando da reserva: '{backup_file}'")
+            print(
+                f"[AVISO] Arquivo '{raw_filename}' nao encontrado na pasta oficial. Carregando da reserva: '{backup_file}'"
+            )
             return str(backup_file)
 
     raise FileNotFoundError(
@@ -44,17 +47,25 @@ def main(raw_file: str, lake_root: str | None):
     lake_root = resolve_lake_root(lake_root)
 
     spark = (
-        SparkSession.builder
-        .appName("pod_cartoes_fatura_trusted")
+        SparkSession.builder.appName("pod_cartoes_fatura_trusted")
         .config("spark.sql.shuffle.partitions", "8")
         .config("spark.hadoop.io.native.lib.available", "false")
-        .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
-        .config("spark.hadoop.mapreduce.outputcommitter.factory.scheme.file", "org.apache.hadoop.mapreduce.lib.output.FileOutputCommitterFactory")
-        .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
+        .config(
+            "spark.hadoop.fs.file.impl",
+            "org.apache.hadoop.fs.RawLocalFileSystem",
+        )
+        .config(
+            "spark.hadoop.mapreduce.outputcommitter.factory.scheme.file",
+            "org.apache.hadoop.mapreduce.lib.output.FileOutputCommitterFactory",
+        )
+        .config(
+            "spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version",
+            "2",
+        )
         .config("spark.hadoop.fs.permissions.umask-mode", "022")
         .getOrCreate()
     )
-    
+
     dt_proc = datetime.now().strftime("%Y%m%d%H%M%S")
 
     # Resolve o caminho com suporte a busca em pastas de reserva
@@ -65,6 +76,7 @@ def main(raw_file: str, lake_root: str | None):
     print(f"[fatura] {qtd_raw} registros lidos de {raw_path}")
     df_fatura.createOrReplaceTempView("df_fatura")
 
+    # SQL mantendo o padrao de formatacao da escola
     df_fatura_format = spark.sql(f"""
         select
             cast(regexp_replace(cast(id_fatura as string), '[^0-9]', '') as bigint) as id_fatura,
@@ -80,21 +92,33 @@ def main(raw_file: str, lake_root: str | None):
     df_fatura_format.cache()
 
     check_integrity(
-        spark, df_fatura_format,
+        spark,
+        df_fatura_format,
         tabela="tb_01_fatura",
         lake_root=lake_root,
         dt_proc=dt_proc,
         key_cols=["id_cliente", "id_fatura", "dt_proc"],
-        not_null_cols=["id_cliente", "id_fatura", "data_emissao", "valor_fatura"],
+        not_null_cols=[
+            "id_cliente",
+            "id_fatura",
+            "data_emissao",
+            "valor_fatura",
+        ],
         reconcile_against=qtd_raw,
     )
 
     trusted_path = layer_path(lake_root, "trusted", "tb_01_fatura")
-    df_fatura_format.write.mode("append").partitionBy("ref").parquet(trusted_path)
+    df_fatura_format.write.mode("append").partitionBy("ref").parquet(
+        trusted_path
+    )
     print(f"[fatura] gravado em {trusted_path}")
 
+    # Boa pratica: Desaloca o cache de memoria RAM apos a gravacao
+    df_fatura_format.unpersist()
+
     record_lineage(
-        spark, lake_root,
+        spark,
+        lake_root,
         tabela="tb_01_fatura",
         dt_proc=dt_proc,
         qtd_registros=qtd_raw,
@@ -107,7 +131,9 @@ def main(raw_file: str, lake_root: str | None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--raw-file", required=True, help="nome do CSV dentro de raw/fatura/")
+    parser.add_argument(
+        "--raw-file", required=True, help="nome do CSV dentro de raw/fatura/"
+    )
     parser.add_argument("--lake-root", default=None)
     args = parser.parse_args()
     main(args.raw_file, args.lake_root)
