@@ -76,10 +76,12 @@ st.markdown("""
 def init_db() -> duckdb.DuckDBPyConnection:
     script_dir = Path(__file__).resolve().parent
 
-    if (script_dir / "trusted").exists():
-        base_dir = script_dir
+    if (script_dir / "datalake").exists():
+        base_dir = script_dir / "datalake"
+    elif (script_dir.parent / "datalake").exists():
+        base_dir = script_dir.parent / "datalake"
     else:
-        base_dir = script_dir.parent
+        base_dir = script_dir
 
     con = duckdb.connect()
 
@@ -87,59 +89,58 @@ def init_db() -> duckdb.DuckDBPyConnection:
     con.execute("SET preserve_insertion_order = false;")
     con.execute("SET threads = 2;")
 
-    fat_path = str(base_dir / "trusted" / "tb_01_fatura" / "*" / "*.parquet").replace("\\", "/")
-    pag_path = str(base_dir / "trusted" / "tb_02_pagamento" / "*" / "*.parquet").replace("\\", "/")
-    book_path = str(base_dir / "refined" / "book_fatura" / "*" / "*.parquet").replace("\\", "/")
+    fat_path = str(base_dir / "*" / "tb_01_fatura" / "*" / "*.parquet").replace("\\", "/")
+    pag_path = str(base_dir / "*" / "tb_02_pagamento" / "*" / "*.parquet").replace("\\", "/")
+    book_path = str(base_dir / "*" / "book_fatura" / "*" / "*.parquet").replace("\\", "/")
 
-    if len(list((base_dir / "trusted").glob("*.parquet"))) > 0 or len(list((base_dir / "trusted").glob("*/*.parquet"))) > 0:
-        fat_path = str(base_dir / "trusted" / "*" / "*.parquet").replace("\\", "/")
-        pag_path = str(base_dir / "trusted" / "*" / "*.parquet").replace("\\", "/")
-
-    if len(list((base_dir / "refined").glob("*.parquet"))) > 0 or len(list((base_dir / "refined").glob("*/*.parquet"))) > 0:
-        book_path = str(base_dir / "refined" / "*" / "*.parquet").replace("\\", "/")
-
+    # View 1: Faturas
     con.execute(f"""
         CREATE OR REPLACE VIEW tb_faturas AS
         SELECT
-            CAST(id_fatura              AS BIGINT)  AS id_fatura,
+            CAST(ref                    AS VARCHAR) AS ref,
+            CAST(dt_proc                AS VARCHAR) AS dt_proc,
             CAST(id_cliente             AS BIGINT)  AS id_cliente,
+            CAST(id_fatura              AS BIGINT)  AS id_fatura,
             CAST(data_emissao           AS DATE)    AS data_emissao,
             CAST(data_vencimento        AS DATE)    AS data_vencimento,
             CAST(valor_fatura           AS DOUBLE)  AS valor_fatura,
             CAST(valor_pagamento_minimo AS DOUBLE)  AS valor_pagamento_minimo,
-            regexp_extract(filename, 'ref=([^/\\\\]+)', 1) AS safra_raw,
-            STRPTIME(regexp_extract(filename, 'ref=([^/\\\\]+)', 1), '%Y%m') AS data_referencia
+            STRPTIME(CAST(ref AS VARCHAR), '%Y%m') AS data_referencia
         FROM read_parquet('{fat_path}', filename=true, union_by_name=true)
     """)
 
+    # View 2: Pagamentos
     con.execute(f"""
         CREATE OR REPLACE VIEW tb_pagamentos AS
         SELECT
-            CAST(id_pagamento   AS BIGINT)  AS id_pagamento,
-            CAST(id_fatura      AS BIGINT)  AS id_fatura,
+            CAST(ref            AS VARCHAR) AS ref,
+            CAST(dt_proc        AS VARCHAR) AS dt_proc,
             CAST(id_cliente     AS BIGINT)  AS id_cliente,
+            CAST(id_fatura      AS BIGINT)  AS id_fatura,
+            CAST(id_pagamento   AS BIGINT)  AS id_pagamento,
             CAST(data_pagamento AS DATE)    AS data_pagamento,
             CAST(valor_pagamento AS DOUBLE) AS valor_pagamento,
-            regexp_extract(filename, 'ref=([^/\\\\]+)', 1) AS safra_raw,
-            STRPTIME(regexp_extract(filename, 'ref=([^/\\\\]+)', 1), '%Y%m') AS data_referencia
+            STRPTIME(CAST(ref AS VARCHAR), '%Y%m') AS data_referencia
         FROM read_parquet('{pag_path}', filename=true, union_by_name=true)
     """)
 
+    # View 3: Book
     con.execute(f"""
         CREATE OR REPLACE VIEW vw_book_fatura AS
         SELECT 
             *,
-            regexp_extract(filename, 'ref=([^/\\\\]+)', 1) AS safra_raw,
-            STRPTIME(regexp_extract(filename, 'ref=([^/\\\\]+)', 1), '%Y%m') AS data_referencia
+            STRPTIME(CAST(ref AS VARCHAR), '%Y%m') AS data_referencia
         FROM read_parquet('{book_path}', filename=true, union_by_name=true)
     """)
 
+    # View 4: Join Integrado
     con.execute("""
         CREATE OR REPLACE VIEW vw_join AS
         SELECT
+            f.ref,
+            f.dt_proc,
             f.id_fatura,
             f.id_cliente,
-            f.safra_raw,
             f.data_referencia,
             STRFTIME(f.data_referencia, '%m/%Y') AS mes_ano,
             f.data_emissao,
@@ -151,6 +152,7 @@ def init_db() -> duckdb.DuckDBPyConnection:
             GREATEST(0, DATEDIFF('day', f.data_vencimento, COALESCE(p.data_pagamento, CURRENT_DATE))) AS dias_atraso,
             CASE
                 WHEN p.data_pagamento IS NULL THEN 'Inadimplente'
+                WHEN p.valor_pagamento < f.valor_fatura THEN 'Pagamento Parcial'
                 WHEN p.data_pagamento < f.data_vencimento THEN 'Pagamento Antecipado'
                 WHEN p.data_pagamento = f.data_vencimento THEN 'Pagamento em Dia'
                 ELSE 'Em Atraso'
@@ -162,7 +164,6 @@ def init_db() -> duckdb.DuckDBPyConnection:
     """)
 
     return con
-
 
 con = init_db()
 
@@ -972,14 +973,15 @@ with aba_perfil:
 with aba_book:
     st.info("""
         **Camada Refined (Feature Store) para Machine Learning:**  
-        Tradução de transações brutas em métricas comportamentais agregadas (janelas de **3, 6 e 12 meses**).  
-        *Nota de Engenharia:* Valores `NULL` nesta camada são mantidos intactos no Parquet/CSV para modelos de ML, e preenchidos com `0` na visualização para métricas de volume e frequência.
+        Tradução de transações brutas em métricas comportamentais agregadas (janelas de **1, 3, 6 e 12 meses**).  
+        Colunas reorganizadas com `ref`, `dt_proc` e `id_cliente` no início para garantir governança.
     """)
 
-    df_sample_book = q("SELECT * FROM vw_book_fatura LIMIT 100")
+    # Traz as colunas com ref, dt_proc e id_cliente obrigatoriamente primeiro
+    df_sample_book = q("SELECT ref, dt_proc, id_cliente, * EXCLUDE (ref, dt_proc, id_cliente) FROM vw_book_fatura LIMIT 100")
 
     if isinstance(df_sample_book, pd.DataFrame) and not df_sample_book.empty:
-        total_cols = max(0, len(df_sample_book.columns) - 2)
+        total_cols = max(0, len(df_sample_book.columns) - 3)
         st.metric("Total de Features Geradas no Book", total_cols)
 
         df_book_display = df_sample_book.copy()
@@ -993,24 +995,29 @@ with aba_book:
     else:
         st.error("Não foi possível conectar à View 'vw_book_fatura'. Verifique os arquivos Parquet na pasta datalake.")
 
-
 # ──────────────────────────────────────────────────────────────
 # ABA 8: QUALIDADE DOS DADOS 
 
 with aba_qual:
     st.subheader("Diagnóstico e Integridade dos Dados")
     
+    # Consultas ajustadas trocando 'safra_raw' por 'ref'
     df_dup_fat = q("""
         SELECT COUNT(*) - COUNT(DISTINCT id_fatura) AS dup_fat
-        FROM (SELECT id_fatura, safra_raw FROM tb_faturas GROUP BY id_fatura, safra_raw)
+        FROM (SELECT id_fatura, ref FROM tb_faturas GROUP BY id_fatura, ref)
     """)
+    
     df_dup_pag = q("""
         SELECT COUNT(*) - COUNT(DISTINCT id_pagamento) AS dup_pag
-        FROM (SELECT id_pagamento, safra_raw FROM tb_pagamentos GROUP BY id_pagamento, safra_raw)
+        FROM (SELECT id_pagamento, ref FROM tb_pagamentos GROUP BY id_pagamento, ref)
     """)
 
-    q1, q2 = st.columns(2)
-    q1.metric("Duplicatas em Faturas (Deduplicado)", f"{df_dup_fat['dup_fat'].iloc[0]}", delta="OK")
-    q2.metric("Duplicatas em Pagamentos (Deduplicado)", f"{df_dup_pag['dup_pag'].iloc[0]}", delta="OK")
+    # Leitura segura com fallback para 0 caso a query não retorne
+    qtd_dup_fat = df_dup_fat['dup_fat'].iloc[0] if (isinstance(df_dup_fat, pd.DataFrame) and not df_dup_fat.empty and 'dup_fat' in df_dup_fat.columns) else 0
+    qtd_dup_pag = df_dup_pag['dup_pag'].iloc[0] if (isinstance(df_dup_pag, pd.DataFrame) and not df_dup_pag.empty and 'dup_pag' in df_dup_pag.columns) else 0
 
-    st.success("Todos os arquivos Parquet foram limpos e validados pela camada de Observabilidade.")
+    q1, q2 = st.columns(2)
+    q1.metric("Duplicatas em Faturas (Deduplicado)", f"{qtd_dup_fat}", delta="OK")
+    q2.metric("Duplicatas em Pagamentos (Deduplicado)", f"{qtd_dup_pag}", delta="OK")
+
+    st.success("Todos os arquivos Parquet foram limpos, deduplicados e validados pela camada de Observabilidade.")

@@ -1,6 +1,6 @@
 """
-Camada Trusted — Pagamento (raw -> 002_trusted/tb_02_pagamento)
-Suporte para fallback automatico em pastas de reserva/backup.
+Camada Trusted — Pagamento (raw -> trusted/tb_02_pagamento)
+Suporte para fallback automático em pastas de reserva/backup.
 """
 
 import argparse
@@ -12,12 +12,12 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common.lake import layer_path, resolve_lake_root  # noqa: E402
-from common.observability import check_integrity, record_lineage  # noqa: E402
+from common.lake import layer_path, resolve_lake_root
+from common.observability import check_integrity, record_lineage
 
 
 def get_raw_file_path(lake_root: str, dataset: str, raw_filename: str) -> str:
-    """Busca o arquivo na pasta oficial raw. Se nao encontrar, busca nas pastas de backup."""
+    """Busca o arquivo na pasta oficial raw. Se não encontrar, busca nas pastas de backup."""
     raw_dir = Path(layer_path(lake_root, "raw", dataset))
     official_file = raw_dir / raw_filename
 
@@ -32,11 +32,11 @@ def get_raw_file_path(lake_root: str, dataset: str, raw_filename: str) -> str:
 
     for backup_file in backup_sources:
         if backup_file.exists():
-            print(f"[AVISO] Arquivo '{raw_filename}' nao encontrado na pasta oficial. Carregando da reserva: '{backup_file}'")
+            print(f"[AVISO] Arquivo '{raw_filename}' não encontrado na pasta oficial. Carregando da reserva: '{backup_file}'")
             return str(backup_file)
 
     raise FileNotFoundError(
-        f"Arquivo '{raw_filename}' nao encontrado em '{official_file}' nem nos backups (backup_01, backup_02)."
+        f"Arquivo '{raw_filename}' não encontrado em '{official_file}' nem nos backups (backup_01, backup_02)."
     )
 
 
@@ -57,7 +57,6 @@ def main(raw_file: str, lake_root: str | None):
 
     dt_proc = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    # Resolve o caminho com suporte a busca em pastas de reserva
     raw_path = get_raw_file_path(lake_root, "pagamento", raw_file)
 
     df_pagamento = spark.read.option("header", "true").csv(raw_path)
@@ -65,18 +64,18 @@ def main(raw_file: str, lake_root: str | None):
     print(f"[pagamento] {qtd_raw} registros lidos de {raw_path}")
     df_pagamento.createOrReplaceTempView("df_pagamento")
 
-    # SQL Ajustado: Chaves convertidas para INT e Safra com date_format seguro
     df_pagamento_format = spark.sql(f"""
         select
-            cast(regexp_replace(cast(id_pagamento as string), '[^0-9]', '') as int) as id_pagamento,
-            cast(regexp_replace(cast(id_fatura as string), '[^0-9]', '') as int) as id_fatura,
-            cast(id_cliente as int) as id_cliente,
-            "{dt_proc}" as dt_proc,
             date_format(cast(dt_pagamento as date), 'yyyyMM') as ref,
+            "{dt_proc}" as dt_proc,
+            cast(id_cliente as int) as id_cliente,
+            cast(regexp_replace(cast(id_fatura as string), '[^0-9]', '') as int) as id_fatura,
+            cast(regexp_replace(cast(id_pagamento as string), '[^0-9]', '') as int) as id_pagamento,
             cast(dt_pagamento as date) as data_pagamento,
             cast(valor_pagamento as decimal(15,2)) as valor_pagamento
         from df_pagamento
     """)
+    
     df_pagamento_format.cache()
 
     check_integrity(
@@ -84,8 +83,8 @@ def main(raw_file: str, lake_root: str | None):
         tabela="tb_02_pagamento",
         lake_root=lake_root,
         dt_proc=dt_proc,
-        key_cols=["id_cliente", "id_fatura", "id_pagamento", "dt_proc"],
-        not_null_cols=["id_cliente", "id_fatura", "id_pagamento", "data_pagamento", "valor_pagamento"],
+        key_cols=["ref", "dt_proc", "id_cliente", "id_fatura", "id_pagamento"],
+        not_null_cols=["ref", "dt_proc", "id_cliente", "id_fatura", "id_pagamento", "data_pagamento", "valor_pagamento"],
         reconcile_against=qtd_raw,
     )
 
@@ -93,7 +92,6 @@ def main(raw_file: str, lake_root: str | None):
     df_pagamento_format.write.mode("append").partitionBy("ref").parquet(trusted_path)
     print(f"[pagamento] gravado em {trusted_path}")
 
-    # Libera o cache de memória alocado
     df_pagamento_format.unpersist()
 
     record_lineage(

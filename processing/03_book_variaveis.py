@@ -1,5 +1,6 @@
 """
-Book de Variaveis (002_trusted -> 003_refined/book_fatura)
+Book de Variáveis (trusted -> refined/book_fatura)
+Consolida métricas e constrói flags de janela temporal móvel.
 """
 import argparse
 import os
@@ -11,10 +12,10 @@ from pyspark.sql.functions import col, row_number
 from pyspark.sql.window import Window
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common.lake import layer_path, resolve_lake_root  # noqa: E402
-from common.observability import check_integrity, record_lineage  # noqa: E402
+from common.lake import layer_path, resolve_lake_root
+from common.observability import check_integrity, record_lineage
 
-FBCS = ["PAGO_EM_ATRASO", "NAO_PAGO", "PAGO_EM_DIA", "PAGAMENTO_ANTECIPADO"]
+FBCS = ["PAGO_EM_ATRASO", "NAO_PAGO", "PAGO_EM_DIA", "PAGAMENTO_ANTECIPADO", "PAGAMENTO_PARCIAL"]
 JANELAS = {"total": None, "u1m": "flg_u1m", "u3m": "flg_u3m", "u6m": "flg_u6m", "u12m": "flg_u12m"}
 
 METRIC_SPECS = []
@@ -29,7 +30,7 @@ for fbc in FBCS:
 
 
 def dedup_latest(df, key_cols: list):
-    """Manten so o registro mais recente (maior dt_proc) por chave."""
+    """Mantém apenas o registro mais recente (maior dt_proc) por chave primária de negócio."""
     w = Window.partitionBy(*key_cols).orderBy(col("dt_proc").desc())
     return (
         df.withColumn("_rn", row_number().over(w))
@@ -38,8 +39,14 @@ def dedup_latest(df, key_cols: list):
     )
 
 
-def build_book_query() -> str:
-    select_parts = ["id_cliente", "ref"]
+def build_book_query(dt_proc_val: str) -> str:
+    # Garantindo ref, dt_proc e id_cliente nas primeiras posições de projeção
+    select_parts = [
+        "ref",
+        f"'{dt_proc_val}' AS dt_proc",
+        "id_cliente"
+    ]
+    
     for nome_metrica, coluna_valor, agg, fbc, janela_nome in METRIC_SPECS:
         janela_col = JANELAS[janela_nome]
         janela_cond = "1=1" if janela_col is None else f"{janela_col} = 1"
@@ -62,7 +69,8 @@ def build_book_query() -> str:
         SELECT
             {select_sql}
         FROM janela_de_tempo
-        GROUP BY id_cliente, ref
+        GROUP BY ref, id_cliente
+        ORDER BY ref ASC, id_cliente ASC
     """
 
 
@@ -92,7 +100,7 @@ def main(ref_date_str: str | None, lake_root: str | None):
     if ref_date_str:
         ref_yyyymm = ref_date_str.replace("-", "")[:6]
         tb_fatura = tb_fatura.where(f"ref = '{ref_yyyymm}'")
-        print(f"[fatura] Filtrando apenas a safra ref = {ref_yyyymm}")
+        print(f"[fatura] Filtrando safra ref = {ref_yyyymm}")
 
     tb_fatura_dedup = dedup_latest(tb_fatura, ["id_cliente", "id_fatura"])
     tb_fatura_dedup.createOrReplaceTempView("tb_fatura_final")
@@ -119,13 +127,15 @@ def main(ref_date_str: str | None, lake_root: str | None):
     """)
     df_join.createOrReplaceTempView("df_join")
 
+    # Regra de classificação alinhada com as flags de negócio
     tb_classificado = spark.sql("""
         select
             *,
             case
                 when data_pagamento is null then 'NAO_PAGO'
-                when data_pagamento = data_vencimento then 'PAGO_EM_DIA'
+                when valor_pagamento < valor_fatura then 'PAGAMENTO_PARCIAL'
                 when data_pagamento < data_vencimento then 'PAGAMENTO_ANTECIPADO'
+                when data_pagamento = data_vencimento then 'PAGO_EM_DIA'
                 when data_pagamento > data_vencimento then 'PAGO_EM_ATRASO'
             end fbc_classificacao_pagamento
         from df_join
@@ -140,8 +150,7 @@ def main(ref_date_str: str | None, lake_root: str | None):
             case
                 when fbc_classificacao_pagamento = 'NAO_PAGO' then datediff({ref_eval_date}, data_vencimento)
                 when fbc_classificacao_pagamento = 'PAGO_EM_ATRASO' then datediff(data_pagamento, data_vencimento)
-                when fbc_classificacao_pagamento = 'PAGO_EM_DIA' then 0
-                when fbc_classificacao_pagamento = 'PAGAMENTO_ANTECIPADO' then 0
+                else 0
             end fvl_numero_dias_atraso
         from tb_classificado
     """)
@@ -149,9 +158,9 @@ def main(ref_date_str: str | None, lake_root: str | None):
 
     stage = spark.sql(f"""
         select
-            id_cliente,
             ref,
             "{dt_proc}" as dt_proc,
+            id_cliente,
             fbc_classificacao_pagamento,
             data_emissao,
             valor_fatura as fvl_valor_fatura,
@@ -178,7 +187,7 @@ def main(ref_date_str: str | None, lake_root: str | None):
     """)
     janela_de_tempo.createOrReplaceTempView("janela_de_tempo")
 
-    book = spark.sql(build_book_query())
+    book = spark.sql(build_book_query(dt_proc))
     book.cache()
 
     check_integrity(
@@ -186,13 +195,13 @@ def main(ref_date_str: str | None, lake_root: str | None):
         tabela="book_fatura",
         lake_root=lake_root,
         dt_proc=dt_proc,
-        key_cols=["id_cliente", "ref"],
-        not_null_cols=["id_cliente", "ref"],
+        key_cols=["ref", "dt_proc", "id_cliente"],
+        not_null_cols=["ref", "dt_proc", "id_cliente"],
     )
 
     book_path = layer_path(lake_root, "refined", "book_fatura")
     book.write.mode("append").partitionBy("ref").parquet(book_path)
-    print(f"[book] {book.count()} registros de clientes gravados em {book_path}")
+    print(f"[book] {book.count()} registros salvos em {book_path}")
 
     record_lineage(
         spark, lake_root,
@@ -200,7 +209,7 @@ def main(ref_date_str: str | None, lake_root: str | None):
         dt_proc=dt_proc,
         qtd_registros=book.count(),
         camada_origem="002_trusted/tb_01_fatura + tb_02_pagamento",
-        arquivo_origem="todas_as_safras_e_anos",
+        arquivo_origem="safras_consolidadas",
     )
 
     spark.stop()
@@ -208,7 +217,7 @@ def main(ref_date_str: str | None, lake_root: str | None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ref-date", required=False, default=None, help="data de referencia (opcional, formato YYYY-MM-DD)")
+    parser.add_argument("--ref-date", required=False, default=None, help="data de referência (YYYY-MM-DD)")
     parser.add_argument("--lake-root", default=None)
     args = parser.parse_args()
     main(args.ref_date, args.lake_root)
